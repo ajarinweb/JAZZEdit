@@ -416,6 +416,78 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+/* ─── PICKER & FORM MODALS ───────────────────────────────────── */
+#picker-overlay, #form-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.65); z-index:201;
+  align-items:center; justify-content:center;
+}
+#picker-overlay.active, #form-overlay.active { display:flex; }
+
+#picker-box {
+  background:var(--bg2); border:1px solid var(--border);
+  border-top:3px solid var(--accent2); border-radius:8px;
+  padding:20px; width:420px; max-height:72vh;
+  display:flex; flex-direction:column; gap:10px;
+}
+#picker-box h3 { font-size:14px; font-weight:700; color:var(--accent2); }
+#picker-search {
+  background:var(--bg); border:1px solid var(--border); border-radius:4px;
+  color:var(--text); padding:6px 10px;
+  font-family:'JetBrains Mono',monospace; font-size:12px; outline:none;
+}
+#picker-search:focus { border-color:var(--accent2); }
+#picker-list {
+  flex:1; overflow-y:auto;
+  display:flex; flex-direction:column; gap:2px; min-height:80px;
+}
+.picker-item {
+  padding:7px 10px; border-radius:4px; cursor:pointer;
+  font-family:'JetBrains Mono',monospace; font-size:12px;
+  color:var(--text2); display:flex; align-items:center; gap:8px;
+  transition:background 0.1s;
+}
+.picker-item:hover { background:var(--bg3); color:var(--text); }
+.picker-item .pi-tag {
+  font-size:10px; padding:1px 5px; border-radius:2px;
+  background:rgba(124,131,253,0.15); color:var(--accent2); flex-shrink:0;
+}
+.picker-item .pi-sub { color:var(--text3); font-size:10px; }
+
+#form-box {
+  background:var(--bg2); border:1px solid var(--border);
+  border-top:3px solid var(--accent3); border-radius:8px;
+  padding:22px; width:440px; max-height:80vh;
+  display:flex; flex-direction:column; gap:12px; overflow-y:auto;
+}
+#form-box h3 { font-size:14px; font-weight:700; color:var(--accent3); }
+.form-field { display:flex; flex-direction:column; gap:4px; }
+.form-field label {
+  font-size:11px; color:var(--text3); font-family:'JetBrains Mono',monospace;
+  text-transform:uppercase; letter-spacing:0.5px;
+}
+.form-input {
+  background:var(--bg); border:1px solid var(--border); border-radius:3px;
+  color:var(--text); padding:6px 10px;
+  font-family:'JetBrains Mono',monospace; font-size:12px; outline:none;
+}
+.form-input:focus { border-color:var(--accent3); }
+.form-input-row { display:flex; gap:6px; }
+.form-input-row .form-input { flex:1; }
+.form-select {
+  background:var(--bg3); border:1px solid var(--border); border-radius:3px;
+  color:var(--text); padding:6px 8px;
+  font-family:'JetBrains Mono',monospace; font-size:12px; cursor:pointer;
+}
+.form-hint { font-size:10px; color:var(--text3); font-family:'JetBrains Mono',monospace; }
+.form-sep { height:1px; background:var(--border); margin:4px 0; }
+.btn-submit {
+  background:rgba(105,255,180,0.12); color:var(--accent3);
+  border:1px solid rgba(105,255,180,0.35);
+}
+.btn-submit:hover { background:rgba(105,255,180,0.22); }
+
+
 /* ─── ACTION BUTTONS ─────────────────────────────── */
 .action-bar {
   display: flex;
@@ -531,6 +603,31 @@ body {
     <div class="modal-btns">
       <button class="btn btn-open" id="modal-cancel" style="padding:5px 16px">Cancel</button>
       <button class="btn btn-delete btn-action" id="modal-confirm" style="padding:5px 16px;font-size:13px">Delete</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- PICKER MODAL -->
+<div id="picker-overlay">
+  <div id="picker-box">
+    <h3 id="picker-title">Select</h3>
+    <input id="picker-search" type="text" placeholder="🔍 Filter...">
+    <div id="picker-list"></div>
+    <div class="modal-btns" style="margin-top:4px">
+      <button class="btn btn-open" id="picker-cancel" style="padding:5px 16px">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- FORM MODAL -->
+<div id="form-overlay">
+  <div id="form-box">
+    <h3 id="form-title">Create</h3>
+    <div id="form-fields"></div>
+    <div class="modal-btns" style="margin-top:4px">
+      <button class="btn btn-open" id="form-cancel" style="padding:5px 16px">Cancel</button>
+      <button class="btn btn-action btn-submit" id="form-submit" style="padding:5px 16px;font-size:13px">✚ Create</button>
     </div>
   </div>
 </div>
@@ -1078,9 +1175,13 @@ function serializeChunkBody(chunk) {
   }
 
   const arr = w.toUint8Array();
+  if (chunk.isNew) {
+    chunk.rawData = arr; // bootstrap rawData for new chunks
+    return arr;
+  }
   if (arr.length !== chunk.rawData.length) {
     console.error(`[Jazz] ⚠ Chunk #${chunk.index} (${chunk.typeName}) size mismatch: wrote ${arr.length}, expected ${chunk.rawData.length} — using rawData instead!`);
-    return chunk.rawData; // safety: don't corrupt the file
+    return chunk.rawData;
   }
   return arr;
 }
@@ -1334,6 +1435,17 @@ function renderProps() {
     <span class="ci-item">Size: <b>${chunk.rawData.length} B</b></span>
     <span class="ci-item">Instance: <b>${h64(chunk.instance.lo, chunk.instance.hi)}</b></span>
   `;
+  // Clone button in infobar
+  const cloneBtn = el('button', 'btn-action btn-add', '⧉ Clone');
+  cloneBtn.style.cssText = 'margin-left:auto; padding:3px 10px; font-size:11px; flex-shrink:0;';
+  cloneBtn.title = 'Duplicate this chunk as a new unlinked chunk';
+  cloneBtn.onclick = () => {
+    const newIdx = cloneChunk(state.selIdx);
+    state.selIdx = newIdx;
+    notify(`Cloned → new chunk #${newIdx}`);
+    renderTree(); renderProps();
+  };
+  infobar.appendChild(cloneBtn);
   panel.appendChild(infobar);
 
   if (chunk.type === 0x02d5df13) renderStateMachineProps(panel, chunk);
@@ -1414,11 +1526,24 @@ function renderStateMachineProps(panel, chunk) {
     const sc = all[idx];
     if (!sc) return;
     const nameHash = sc.fields ? h8(sc.fields.stateName) : '?';
-    stb.appendChild(linkItem('📌', `State ${nameHash}`, `#${idx}`, () => {
-      state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps();
-    }));
+    const li = linkItemDel(
+      '📌', `State ${nameHash}`, `#${idx}`,
+      () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
+      () => {
+        removeStateFromSM(chunk, idx);
+        notify(`Removed State #${idx} from StateMachine (chunk not deleted)`);
+        renderTree(); renderProps();
+      }
+    );
+    stb.appendChild(li);
   });
   if (f.states.length === 0) stb.appendChild(el('div', 'no-items', 'No states'));
+  // Add State button
+  const smBar = el('div', 'action-bar');
+  const btnAddState = el('button', 'btn-action btn-add', '✚ Add New State');
+  btnAddState.onclick = () => uiAddStateToSM();
+  smBar.appendChild(btnAddState);
+  sts.appendChild(smBar);
   panel.appendChild(sts);
 
   // Actors
@@ -1567,6 +1692,11 @@ function renderStateProps(panel, chunk) {
     trb.appendChild(li);
   });
   if (f.transitions.length === 0) trb.appendChild(el('div', 'no-items', 'Terminal state (no transitions)'));
+  const transBar = el('div', 'action-bar');
+  const btnAddTrans = el('button', 'btn-action btn-add', '✚ Add Transition');
+  btnAddTrans.onclick = () => uiAddTransition(chunk);
+  transBar.appendChild(btnAddTrans);
+  trs.appendChild(transBar);
   panel.appendChild(trs);
 }
 
@@ -1632,6 +1762,9 @@ function renderDGProps(panel, chunk) {
 
   // Bulk action bar
   const bulkBar = el('div', 'action-bar');
+  const btnAddNode = el('button', 'btn-action btn-add', '✚ Add Node');
+  btnAddNode.onclick = () => uiAddNodeToDG(chunk);
+  bulkBar.appendChild(btnAddNode);
   const btnDelAll = el('button', 'btn-action btn-delete', '🗑 Delete ALL nodes');
   btnDelAll.title = 'Delete all nodes in this DecisionGraph from the file';
   btnDelAll.onclick = () => {
@@ -2168,6 +2301,431 @@ function removeStateFromSM(smChunk, stateIdx) {
 function removeTransitionFromState(stateChunk, targetIdx) {
   stateChunk.fields.transitions = stateChunk.fields.transitions.filter(i => i !== targetIdx);
   stateChunk.modified = true;
+}
+
+
+// ═══════════════════════════════════════════════════════
+// ADD / CLONE FEATURES
+// ═══════════════════════════════════════════════════════
+
+// ── Generic Picker Modal ─────────────────────────────────────────────
+function showPicker(title, items, onPick) {
+  // items: [{icon, label, sub, value}]
+  const overlay = document.getElementById('picker-overlay');
+  document.getElementById('picker-title').textContent = title;
+  const search  = document.getElementById('picker-search');
+  const list    = document.getElementById('picker-list');
+  search.value  = '';
+
+  function renderList(filter) {
+    list.innerHTML = '';
+    const f = filter.toLowerCase();
+    let shown = 0;
+    items.forEach(item => {
+      if (f && !item.label.toLowerCase().includes(f) && !String(item.sub||'').toLowerCase().includes(f)) return;
+      const d = document.createElement('div');
+      d.className = 'picker-item';
+      d.innerHTML = `<span>${item.icon||'📦'}</span><span class="pi-tag">${item.tag||''}</span><span style="flex:1">${item.label}</span><span class="pi-sub">${item.sub||''}</span>`;
+      d.addEventListener('click', () => { close(); onPick(item.value); });
+      list.appendChild(d);
+      shown++;
+    });
+    if (!shown) { const e = document.createElement('div'); e.className='no-items'; e.textContent='Nothing found'; list.appendChild(e); }
+  }
+
+  renderList('');
+  search.oninput = e => renderList(e.target.value);
+
+  const close = () => { overlay.classList.remove('active'); search.oninput = null; };
+  document.getElementById('picker-cancel').onclick = close;
+  overlay.onclick = e => { if (e.target === overlay) close(); };
+  overlay.classList.add('active');
+  setTimeout(() => search.focus(), 50);
+}
+
+// ── Generic Form Modal ───────────────────────────────────────────────
+// fields: [{id, label, type:'text'|'select'|'hex', options, value, hint, placeholder}]
+function showForm(title, submitLabel, fields, onSubmit) {
+  const overlay = document.getElementById('form-overlay');
+  document.getElementById('form-title').textContent = title;
+  document.getElementById('form-submit').textContent = submitLabel || '✚ Create';
+
+  const container = document.getElementById('form-fields');
+  container.innerHTML = '';
+  const inputs = {};
+
+  fields.forEach(f => {
+    if (f.type === 'sep') {
+      container.appendChild(document.createElement('div')).className = 'form-sep';
+      return;
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'form-field';
+    const lbl = document.createElement('label');
+    lbl.textContent = f.label;
+    wrap.appendChild(lbl);
+
+    if (f.type === 'select') {
+      const sel = document.createElement('select');
+      sel.className = 'form-select form-input';
+      (f.options||[]).forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt.value; o.textContent = opt.label;
+        if (opt.value === f.value) o.selected = true;
+        sel.appendChild(o);
+      });
+      wrap.appendChild(sel);
+      inputs[f.id] = () => sel.value;
+    } else if (f.type === 'chunk-pick') {
+      // text + button to open picker
+      const row = document.createElement('div');
+      row.className = 'form-input-row';
+      const inp = document.createElement('input');
+      inp.className = 'form-input'; inp.type = 'text';
+      inp.value = f.value || ''; inp.placeholder = f.placeholder || '';
+      inp.readOnly = true; inp.style.cursor = 'pointer';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-action btn-add'; btn.textContent = '🔍 Pick';
+      btn.style.padding = '4px 10px';
+      btn.type = 'button';
+      btn.onclick = () => showPicker(f.pickerTitle||'Select', f.pickerItems||[], val => {
+        inp.value = val.display; inp._pickedValue = val.idx;
+      });
+      row.appendChild(inp); row.appendChild(btn);
+      wrap.appendChild(row);
+      inputs[f.id] = () => inp._pickedValue !== undefined ? inp._pickedValue : null;
+    } else {
+      const inp = document.createElement('input');
+      inp.className = 'form-input'; inp.type = 'text';
+      inp.value = f.value || ''; inp.placeholder = f.placeholder || '';
+      wrap.appendChild(inp);
+      inputs[f.id] = () => inp.value;
+    }
+
+    if (f.hint) {
+      const h = document.createElement('div');
+      h.className = 'form-hint'; h.textContent = f.hint;
+      wrap.appendChild(h);
+    }
+    container.appendChild(wrap);
+  });
+
+  const close = () => overlay.classList.remove('active');
+  document.getElementById('form-cancel').onclick = close;
+  overlay.onclick = e => { if (e.target === overlay) close(); };
+
+  document.getElementById('form-submit').onclick = () => {
+    const vals = {};
+    for (const [k, getter] of Object.entries(inputs)) vals[k] = getter();
+    if (onSubmit(vals) !== false) close();
+  };
+
+  overlay.classList.add('active');
+  // Focus first text input
+  const firstInp = container.querySelector('input[type=text]:not([readonly])');
+  if (firstInp) setTimeout(() => firstInp.focus(), 50);
+}
+
+// ── Deep clone fields object ─────────────────────────────────────────
+function deepCloneFields(fields) {
+  if (!fields) return null;
+  return JSON.parse(JSON.stringify(fields));
+}
+
+// ── Get a safe default FourCC for a type ────────────────────────────
+function getDefaultFourCC(type) {
+  // Prefer copying from an existing chunk so we don't guess
+  if (state.jazz) {
+    const ex = state.jazz.chunks.find(c => c.type === type);
+    if (ex) return ex.fourcc;
+  }
+  const map = {
+    0x02d5df13: 'S_SM', 0x02eedafe: 'S_St', 0x02eedb18: 'S_DG',
+    0x02eedb2f: 'S_AD', 0x02eedb46: 'S_PD',
+    0x02eedb5f: 'Play', 0x0344d438: 'Stop', 0x02eedb70: 'Rand',
+    0x02eeebdd: 'Prop', 0x02eeebdc: 'NxSt', 0x02eeebde: 'AcOp',
+  };
+  return map[type] || '????';
+}
+
+function getDefaultChunkVer(type) {
+  if (state.jazz) {
+    const ex = state.jazz.chunks.find(c => c.type === type);
+    if (ex) return ex.chunkVer;
+  }
+  const map = {
+    0x02d5df13: 0x202, 0x02eedafe: 0x101, 0x02eedb18: 0x101,
+    0x02eedb2f: 0x100, 0x02eedb5f: 0x105, 0x0344d438: 0x104,
+    0x02eedb70: 0x101, 0x02eeebdd: 0x100, 0x02eeebdc: 0x101,
+  };
+  return map[type] || 0x100;
+}
+
+// ── Low-level chunk factory ───────────────────────────────────────────
+function appendChunk(type, fields) {
+  const newIdx = state.jazz.chunks.length;
+  const chunk = {
+    index:    newIdx,
+    type,
+    typeName: CHUNK_TYPES[type] || 'Unknown',
+    fourcc:   getDefaultFourCC(type),
+    chunkVer: getDefaultChunkVer(type),
+    instance: { lo: 0, hi: 0 },
+    group:    0,
+    rawData:  new Uint8Array(0),
+    fields,
+    modified: true,
+    isNew:    true,
+  };
+  state.jazz.chunks.push(chunk);
+  state.jazz.count++;
+  return newIdx;
+}
+
+// ── Clone an existing chunk ───────────────────────────────────────────
+function cloneChunk(srcIdx) {
+  const src = state.jazz.chunks[srcIdx];
+  const newIdx = state.jazz.chunks.length;
+  const cloned = {
+    index:    newIdx,
+    type:     src.type,
+    typeName: src.typeName,
+    fourcc:   src.fourcc,
+    chunkVer: src.chunkVer,
+    instance: { lo: 0, hi: 0 },
+    group:    src.group,
+    rawData:  new Uint8Array(src.rawData), // byte-for-byte copy
+    fields:   deepCloneFields(src.fields),
+    modified: true,
+    isNew:    true,
+  };
+  state.jazz.chunks.push(cloned);
+  state.jazz.count++;
+  return newIdx;
+}
+
+// ── Create DecisionGraph chunk ─────────────────────────────────────
+function createDGChunk() {
+  return appendChunk(0x02eedb18, {
+    unknowns: [0], allNodes: [], graphRoot: [], sentinel: 0xDEADBEEF,
+  });
+}
+
+// ── Create State chunk (with new empty DG) ────────────────────────
+function createStateWithDG(nameHash) {
+  const dgIdx    = createDGChunk();
+  const stateIdx = appendChunk(0x02eedafe, {
+    stateName: nameHash, stateProperties: 0,
+    dgIndex: dgIdx, transitions: [], unknowns: [6],
+  });
+  return { stateIdx, dgIdx };
+}
+
+// ── Create Play Animation chunk (defaults) ─────────────────────────
+function createPlayChunk(clipInstanceHex) {
+  const clipLo = parseInt(clipInstanceHex.slice(-8), 16) || 0;
+  const clipHi = parseInt(clipInstanceHex.slice(0, -8) || '0', 16) || 0;
+  return appendChunk(0x02eedb5f, {
+    clip: { instance: {lo: clipLo, hi: clipHi}, type: 0x6b20c4f3, group: 0 },
+    tkMk: { instance: {lo: 0, hi: 0}, type: 0x033260e3, group: 0 },
+    g1Count: 0, playUnk: [0, 0, 0], group1: [], group2: [],
+    sentinel1: 0xDEADBEEF, playUnk2: [0, 0, 0, 0], strData: '',
+    playUnk3: [0], sentinel2: 0xDEADBEEF,
+    flags: 1, priority: 10000, animUnk1: [0], blendIn: 0.0,
+    animUnk2: [0x3f800000, 0x41800000, 0], // 1.0, 16.0, 0
+    actorIdx: null, priority2: 10000,
+    animUnk3: [0, 0, 0, 0, 0, 0],
+    sentinel3: 0xDEADBEEF, actions: [],
+  });
+}
+
+// ── Create Stop chunk (defaults) ──────────────────────────────────
+function createStopChunk() {
+  return appendChunk(0x0344d438, {
+    flags: 1, priority: 10000, animUnk1: [0], blendIn: 0.0,
+    animUnk2: [0x3f800000, 0x41800000, 0],
+    actorIdx: null, priority2: 10000,
+    animUnk3: [0, 0, 0, 0, 0, 0],
+    sentinel: 0xDEADBEEF, actions: [],
+  });
+}
+
+// ── Create Random chunk (defaults) ────────────────────────────────
+function createRandomChunk() {
+  return appendChunk(0x02eedb70, {
+    choices: [], sentinel: 0xDEADBEEF, flags: 0,
+  });
+}
+
+// ── ADD STATE to StateMachine ─────────────────────────────────────
+function uiAddStateToSM() {
+  showForm('➕ Add New State', '✚ Create State', [
+    {
+      id: 'name', label: 'State Name Hash (hex)',
+      type: 'text', value: '0x00000000',
+      placeholder: '0x12345678',
+      hint: 'uint32 hash of the state name (e.g. 0x42E0CFBC)',
+    },
+    { type: 'sep' },
+    {
+      id: 'props', label: 'State Properties (hex)',
+      type: 'text', value: '0x00000000',
+      placeholder: '0x00000105',
+      hint: 'Flags: bit0=Loop bit1=Persistent bit2=Entry bit3=Exit',
+    },
+  ], vals => {
+    const nameHash = parseHex(vals.name);
+    if (nameHash === null) { alert('Invalid Name Hash'); return false; }
+    const props = parseHex(vals.props) || 0;
+
+    const { stateIdx, dgIdx } = createStateWithDG(nameHash);
+    state.jazz.chunks[stateIdx].fields.stateProperties = props;
+
+    // Add to StateMachine states list
+    const sm = state.jazz.chunks[0];
+    if (sm && sm.fields) {
+      sm.fields.states.push(stateIdx);
+      sm.modified = true;
+    }
+
+    treeExpanded.add(0); treeExpanded.add(stateIdx);
+    state.selIdx = stateIdx;
+    notify(`Created State ${h8(nameHash)} (#${stateIdx}) with DG #${dgIdx}`);
+    renderTree(); renderProps();
+  });
+}
+
+// ── ADD TRANSITION to State ───────────────────────────────────────
+function uiAddTransition(stateChunk) {
+  const allStates = state.jazz.chunks
+    .filter(c => c.type === 0x02eedafe && c !== stateChunk)
+    .map(c => ({
+      icon: '📌',
+      tag:  h8(c.fields?.stateName || 0),
+      label: `State ${h8(c.fields?.stateName || 0)}`,
+      sub:  `#${c.index}`,
+      value: c.index,
+    }));
+
+  if (!allStates.length) { notify('No other states in file'); return; }
+
+  showPicker('➕ Add Transition → select target State', allStates, targetIdx => {
+    // Check not already there
+    if (stateChunk.fields.transitions.includes(targetIdx)) {
+      notify('Transition already exists'); return;
+    }
+    stateChunk.fields.transitions.push(targetIdx);
+    stateChunk.modified = true;
+    const tgt = state.jazz.chunks[targetIdx];
+    notify(`Added transition → State ${h8(tgt?.fields?.stateName || 0)}`);
+    renderTree(); renderProps();
+  });
+}
+
+// ── ADD NODE to DecisionGraph ─────────────────────────────────────
+function uiAddNodeToDG(dgChunk) {
+  // Build options: create new types + clone existing action nodes
+  const items = [];
+
+  // "Create new" options
+  items.push({ icon: '▶', tag: 'NEW', label: 'New Play Animation node', sub: 'enter clip hash', value: { action: 'new-play' } });
+  items.push({ icon: '⏹', tag: 'NEW', label: 'New Stop Animation node', sub: 'default values', value: { action: 'new-stop' } });
+  items.push({ icon: '🎲', tag: 'NEW', label: 'New Random node', sub: 'empty choices', value: { action: 'new-random' } });
+
+  // Clone existing action nodes
+  const actionTypes = [0x02eedb5f, 0x0344d438, 0x02eedb70, 0x02eeebdd, 0x02eeebdc, 0x02eeebde];
+  state.jazz.chunks.forEach(c => {
+    if (!actionTypes.includes(c.type)) return;
+    const icon = CHUNK_ICONS[c.typeName] || '📦';
+    let sub = `#${c.index}`;
+    if (c.type === 0x02eedb5f && c.fields?.clip)
+      sub += `  clip:${h64(c.fields.clip.instance.lo, c.fields.clip.instance.hi)}`;
+    items.push({ icon, tag: 'CLONE', label: c.typeName, sub, value: { action: 'clone', srcIdx: c.index } });
+  });
+
+  showPicker('➕ Add node to DecisionGraph', items, picked => {
+    let newIdx = null;
+
+    if (picked.action === 'new-stop') {
+      newIdx = createStopChunk();
+      finishAddNodeToDG(dgChunk, newIdx);
+      return;
+    }
+    if (picked.action === 'new-random') {
+      newIdx = createRandomChunk();
+      finishAddNodeToDG(dgChunk, newIdx);
+      return;
+    }
+    if (picked.action === 'clone') {
+      newIdx = cloneChunk(picked.srcIdx);
+      finishAddNodeToDG(dgChunk, newIdx);
+      return;
+    }
+    if (picked.action === 'new-play') {
+      // Show form to fill clip hash
+      const existingPlays = state.jazz.chunks
+        .filter(c => c.type === 0x02eedb5f)
+        .map(c => ({
+          icon: '▶',
+          tag:  h64(c.fields?.clip?.instance?.lo||0, c.fields?.clip?.instance?.hi||0),
+          label: `PlayAnimation #${c.index}`,
+          sub:   h64(c.fields?.clip?.instance?.lo||0, c.fields?.clip?.instance?.hi||0),
+          value: { display: h64(c.fields?.clip?.instance?.lo||0, c.fields?.clip?.instance?.hi||0), idx: null, clipHex: h64(c.fields?.clip?.instance?.lo||0, c.fields?.clip?.instance?.hi||0) },
+        }));
+
+      showForm('▶ New Play Animation', '✚ Create', [
+        {
+          id: 'clip', label: 'Clip Instance Hash (hex)',
+          type: 'text', value: '0x0000000000000000',
+          placeholder: '0x1234567890ABCDEF',
+          hint: 'The animation clip resource instance hash',
+        },
+        existingPlays.length ? {
+          id: 'copyFrom', label: 'Or copy clip from existing Play node',
+          type: 'chunk-pick',
+          pickerTitle: 'Pick existing Play node to copy clip from',
+          pickerItems: existingPlays,
+          placeholder: 'Click 🔍 to pick...',
+        } : null,
+        { type: 'sep' },
+        {
+          id: 'actorPick', label: 'Actor (optional)',
+          type: 'chunk-pick',
+          pickerTitle: 'Pick ActorDefinition',
+          pickerItems: state.jazz.chunks
+            .filter(c => c.type === 0x02eedb2f)
+            .map(c => ({
+              icon: '🎪', tag: h8(c.fields?.parameterName||0),
+              label: `ActorDef ${h8(c.fields?.parameterName||0)}`,
+              sub: `#${c.index}`,
+              value: { display: `ActorDef #${c.index}`, idx: c.index },
+            })),
+          placeholder: 'Click 🔍 to pick (optional)...',
+        },
+      ].filter(Boolean), vals => {
+        let clipHex = (vals.copyFrom != null)
+          ? existingPlays.find(p => p.value.idx === vals.copyFrom)?.value.clipHex || vals.clip
+          : vals.clip;
+        // Normalize: strip 0x, pad to 16
+        clipHex = clipHex.replace(/^0x/i,'').padStart(16,'0');
+        newIdx = createPlayChunk(clipHex);
+        if (vals.actorPick !== null && vals.actorPick !== undefined)
+          state.jazz.chunks[newIdx].fields.actorIdx = vals.actorPick;
+        finishAddNodeToDG(dgChunk, newIdx);
+      });
+    }
+  });
+}
+
+function finishAddNodeToDG(dgChunk, newIdx) {
+  const newChunk = state.jazz.chunks[newIdx];
+  dgChunk.fields.allNodes.push(newIdx);
+  dgChunk.fields.graphRoot.push(newIdx);
+  dgChunk.modified = true;
+  treeExpanded.add(dgChunk.index);
+  state.selIdx = newIdx;
+  notify(`Added ${newChunk.typeName} #${newIdx} to DecisionGraph`);
+  renderTree(); renderProps();
 }
 
 // ═══════════════════════════════════════════════════════
