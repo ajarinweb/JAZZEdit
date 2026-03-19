@@ -487,8 +487,7 @@ body {
   <div class="ver-switch" id="verSwitch" style="display:none">
     <span>Save as:</span>
     <select id="saveVersion">
-      <option value="3">v3 (Store)</option>
-      <option value="2">v2 (SmoothJazz)</option>
+      <option value="3">v3 (Game / SmoothJazz)</option>
     </select>
   </div>
 
@@ -974,7 +973,8 @@ function writeResKey(w, k) {
 }
 
 function serializeChunkBody(chunk) {
-  if (!chunk.fields) return chunk.rawData;
+  // Only re-serialize if explicitly modified — otherwise return rawData byte-for-byte
+  if (!chunk.fields || !chunk.modified) return chunk.rawData;
 
   const w = new BinWriter();
   w.fourcc(chunk.fourcc);
@@ -1078,8 +1078,10 @@ function serializeChunkBody(chunk) {
   }
 
   const arr = w.toUint8Array();
-  if (arr.length !== chunk.rawData.length)
-    console.warn(`[Jazz] Chunk #${chunk.index} (${chunk.typeName}) size mismatch: wrote ${arr.length}, expected ${chunk.rawData.length}`);
+  if (arr.length !== chunk.rawData.length) {
+    console.error(`[Jazz] ⚠ Chunk #${chunk.index} (${chunk.typeName}) size mismatch: wrote ${arr.length}, expected ${chunk.rawData.length} — using rawData instead!`);
+    return chunk.rawData; // safety: don't corrupt the file
+  }
   return arr;
 }
 
@@ -2016,6 +2018,7 @@ function updateAllRefsAfterDelete(deletedIdx) {
   const chunks = state.jazz.chunks;
   for (const c of chunks) {
     if (!c.fields) continue;
+    c.modified = true; // ref indices changed → must re-serialize
     const f = c.fields;
 
     // StateMachine
