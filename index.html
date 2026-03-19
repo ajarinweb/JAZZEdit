@@ -416,6 +416,42 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+/* ─── ACTION BUTTONS ─────────────────────────────── */
+.action-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.btn-action {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.3px;
+}
+.btn-detach { background: rgba(255,179,71,0.08); color: var(--warn); border-color: rgba(255,179,71,0.3); }
+.btn-detach:hover { background: rgba(255,179,71,0.18); }
+.btn-delete { background: rgba(255,107,107,0.08); color: var(--error); border-color: rgba(255,107,107,0.3); }
+.btn-delete:hover { background: rgba(255,107,107,0.18); }
+.btn-add { background: rgba(105,255,180,0.08); color: var(--accent3); border-color: rgba(105,255,180,0.3); }
+.btn-add:hover { background: rgba(105,255,180,0.18); }
+.link-item .li-del { margin-left:4px; opacity:0; font-size:12px; color:var(--error); flex-shrink:0; transition:opacity 0.1s; padding:0 4px; border-radius:3px; }
+.link-item:hover .li-del { opacity:1; }
+.link-item .li-del:hover { background:rgba(255,107,107,0.15); }
+#modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:200; align-items:center; justify-content:center; }
+#modal-overlay.active { display:flex; }
+#modal-box { background:var(--bg2); border:1px solid var(--border); border-top:3px solid var(--error); border-radius:8px; padding:24px 28px; max-width:400px; width:90%; }
+#modal-box h3 { font-size:15px; font-weight:700; margin-bottom:8px; color:var(--error); }
+#modal-box p  { font-size:12px; color:var(--text2); margin-bottom:20px; font-family:'JetBrains Mono',monospace; line-height:1.6; }
+.modal-btns { display:flex; gap:10px; justify-content:flex-end; }
+
+
 /* ─── NOTIFICATION ───────────────────────────────── */
 #notif {
   position: fixed;
@@ -485,6 +521,19 @@ body {
     </div>
   </div>
 
+</div>
+
+
+<!-- CONFIRM MODAL -->
+<div id="modal-overlay">
+  <div id="modal-box">
+    <h3 id="modal-title">Confirm</h3>
+    <p id="modal-msg"></p>
+    <div class="modal-btns">
+      <button class="btn btn-open" id="modal-cancel" style="padding:5px 16px">Cancel</button>
+      <button class="btn btn-delete btn-action" id="modal-confirm" style="padding:5px 16px;font-size:13px">Delete</button>
+    </div>
+  </div>
 </div>
 
 <div id="notif"></div>
@@ -1242,6 +1291,20 @@ function linkItem(icon, label, sublabel, onClick) {
   return d;
 }
 
+// linkItem with a ✕ delete button on the right
+function linkItemDel(icon, label, sublabel, onClick, onDelete) {
+  const d = el('div', 'link-item');
+  d.innerHTML = `<span class="li-icon">${icon}</span><span class="li-label">${label}</span><span class="li-idx">${sublabel || ''}</span>`;
+  if (onDelete) {
+    const delBtn = el('span', 'li-del', '✕');
+    delBtn.title = 'Delete / remove';
+    delBtn.addEventListener('click', e => { e.stopPropagation(); onDelete(); });
+    d.appendChild(delBtn);
+  }
+  if (onClick) d.addEventListener('click', onClick);
+  return d;
+}
+
 function renderProps() {
   const panel = document.getElementById('props-panel');
   panel.innerHTML = '';
@@ -1404,6 +1467,7 @@ function renderStateMachineProps(panel, chunk) {
 function renderStateProps(panel, chunk) {
   const f = chunk.fields;
   const all = state.jazz.chunks;
+  const chunkIdx = chunk.index;
 
   const { section: ps, body: pb } = section('📌 State Properties', 'var(--state-color)');
 
@@ -1433,17 +1497,51 @@ function renderStateProps(panel, chunk) {
   }, '(default: 0x00000006)');
   pb.appendChild(unkRow.row);
 
+  // State-level action bar
+  const bar = el('div', 'action-bar');
+  const btnDelState = el('button', 'btn-action btn-delete', '🗑 Delete this State');
+  btnDelState.title = 'Remove state from StateMachine and delete its chunk';
+  btnDelState.onclick = () => {
+    // Remove from SM first
+    const sm = state.jazz.chunks[0];
+    if (sm && sm.fields) removeStateFromSM(sm, chunkIdx);
+    deleteChunk(chunkIdx);
+  };
+  bar.appendChild(btnDelState);
+  ps.appendChild(bar);
   panel.appendChild(ps);
 
   // Decision Graph
   const { section: dgs, body: dgb } = section('🔀 Decision Graph', 'var(--dg-color)');
   if (f.dgIndex !== null) {
-    const dgc = all[f.dgIndex];
+    const dgIdx = f.dgIndex;
+    const dgc = all[dgIdx];
     const nodeCount = dgc?.fields?.allNodes.length ?? '?';
     const rootCount = dgc?.fields?.graphRoot.length ?? '?';
-    dgb.appendChild(linkItem('🔀', `DecisionGraph  (${nodeCount} nodes, ${rootCount} roots)`, `#${f.dgIndex}`, () => {
-      state.selIdx = f.dgIndex; treeExpanded.add(f.dgIndex); renderTree(); renderProps();
-    }));
+    const li = linkItemDel(
+      '🔀',
+      `DecisionGraph  (${nodeCount} nodes, ${rootCount} roots)`,
+      `#${dgIdx}`,
+      () => { state.selIdx = dgIdx; treeExpanded.add(dgIdx); renderTree(); renderProps(); }
+    );
+    dgb.appendChild(li);
+
+    const dgBar = el('div', 'action-bar');
+
+    const btnDetach = el('button', 'btn-action btn-detach', '⚡ Detach DG only');
+    btnDetach.title = 'Remove DG reference from state (chunk stays in file)';
+    btnDetach.onclick = () => detachDGFromState(chunk);
+    dgBar.appendChild(btnDetach);
+
+    const btnDelDG = el('button', 'btn-action btn-delete', '🗑 Delete DG + all nodes');
+    btnDelDG.title = 'Delete the DecisionGraph and all its Play/Stop/etc nodes';
+    btnDelDG.onclick = () => {
+      f.dgIndex = null;
+      chunk.modified = true;
+      deleteChunkWithChildren(dgIdx);
+    };
+    dgBar.appendChild(btnDelDG);
+    dgs.appendChild(dgBar);
   } else {
     dgb.appendChild(el('div', 'no-items', 'No decision graph'));
   }
@@ -1455,9 +1553,16 @@ function renderStateProps(panel, chunk) {
     if (idx === null) return;
     const tc = all[idx];
     const nameHash = tc?.fields ? h8(tc.fields.stateName) : '?';
-    trb.appendChild(linkItem('➡', `State ${nameHash}`, `#${idx}`, () => {
-      state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps();
-    }));
+    const li = linkItemDel(
+      '➡', `State ${nameHash}`, `#${idx}`,
+      () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
+      () => {
+        removeTransitionFromState(chunk, idx);
+        notify(`Removed transition to State #${idx}`);
+        renderTree(); renderProps();
+      }
+    );
+    trb.appendChild(li);
   });
   if (f.transitions.length === 0) trb.appendChild(el('div', 'no-items', 'Terminal state (no transitions)'));
   panel.appendChild(trs);
@@ -1483,24 +1588,73 @@ function renderDGProps(panel, chunk) {
     if (idx === null) return;
     const nc = all[idx];
     const icon = CHUNK_ICONS[nc?.typeName] || '📦';
-    rb.appendChild(linkItem(icon, `${nc?.typeName || '?'}  [root ${i}]`, `#${idx}`, () => {
-      state.selIdx = idx; renderTree(); renderProps();
-    }));
+    const li = linkItemDel(
+      icon, `${nc?.typeName || '?'}  [root ${i}]`, `#${idx}`,
+      () => { state.selIdx = idx; renderTree(); renderProps(); },
+      () => {
+        f.graphRoot = f.graphRoot.filter(x => x !== idx);
+        chunk.modified = true;
+        notify(`Removed root node #${idx} from DecisionGraph`);
+        renderTree(); renderProps();
+      }
+    );
+    rb.appendChild(li);
   });
   if (f.graphRoot.length === 0) rb.appendChild(el('div', 'no-items', 'No root nodes'));
   panel.appendChild(rs);
 
-  // All nodes
+  // All nodes — with per-node delete (remove from DG + delete chunk)
   const { section: as, body: ab } = section(`📋 All Nodes (${f.allNodes.length})`, 'var(--node-color)');
   f.allNodes.forEach((idx, i) => {
     if (idx === null) return;
     const nc = all[idx];
     const icon = CHUNK_ICONS[nc?.typeName] || '📦';
-    ab.appendChild(linkItem(icon, `${nc?.typeName || '?'}`, `#${idx}`, () => {
-      state.selIdx = idx; renderTree(); renderProps();
-    }));
+    const li = linkItemDel(
+      icon, `${nc?.typeName || '?'}`, `#${idx}`,
+      () => { state.selIdx = idx; renderTree(); renderProps(); },
+      () => {
+        confirmModal(
+          `🗑 Delete Node`,
+          `Delete ${nc?.typeName || '?'} #${idx} and remove from this DecisionGraph?`,
+          '🗑 Delete',
+          () => {
+            removeNodeFromDG(chunk, idx);
+            deleteChunk(idx);
+          }
+        );
+      }
+    );
+    ab.appendChild(li);
   });
   if (f.allNodes.length === 0) ab.appendChild(el('div', 'no-items', 'No nodes'));
+
+  // Bulk action bar
+  const bulkBar = el('div', 'action-bar');
+  const btnDelAll = el('button', 'btn-action btn-delete', '🗑 Delete ALL nodes');
+  btnDelAll.title = 'Delete all nodes in this DecisionGraph from the file';
+  btnDelAll.onclick = () => {
+    const nodesCopy = [...f.allNodes].filter(i => i !== null);
+    if (!nodesCopy.length) return;
+    confirmModal(
+      '🗑 Delete All Nodes',
+      `Delete all ${nodesCopy.length} node(s) from this DecisionGraph and from the file?`,
+      '🗑 Delete All',
+      () => {
+        f.graphRoot = []; f.allNodes = [];
+        chunk.modified = true;
+        const sorted = nodesCopy.sort((a, b) => b - a);
+        for (const idx of sorted) {
+          state.jazz.chunks.splice(idx, 1);
+          state.jazz.count--;
+          updateAllRefsAfterDelete(idx);
+        }
+        notify(`Deleted ${sorted.length} nodes`);
+        renderTree(); renderProps();
+      }
+    );
+  };
+  bulkBar.appendChild(btnDelAll);
+  as.appendChild(bulkBar);
   panel.appendChild(as);
 }
 
@@ -1828,6 +1982,189 @@ function renderGenericProps(panel, chunk) {
   hexDiv.innerHTML = hexDump(chunk.rawData);
   hb.appendChild(hexDiv);
   panel.appendChild(hs);
+}
+
+
+// ═══════════════════════════════════════════════════════
+// STRUCTURAL EDITING
+// ═══════════════════════════════════════════════════════
+
+// ─── Confirm modal ───────────────────────────────────
+function confirmModal(title, msg, confirmLabel, onConfirm) {
+  const overlay = document.getElementById('modal-overlay');
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-msg').innerHTML = msg;
+  const confirmBtn = document.getElementById('modal-confirm');
+  confirmBtn.textContent = confirmLabel;
+  overlay.classList.add('active');
+  const close = () => overlay.classList.remove('active');
+  const handler = () => { close(); onConfirm(); };
+  confirmBtn.onclick = handler;
+  document.getElementById('modal-cancel').onclick = close;
+  overlay.onclick = e => { if (e.target === overlay) close(); };
+}
+
+// ─── Update all index refs after deletion ────────────
+function updateIdxRef(i, deletedIdx) {
+  if (i === null || i === undefined) return null;
+  if (i === deletedIdx) return null;
+  if (i > deletedIdx) return i - 1;
+  return i;
+}
+
+function updateAllRefsAfterDelete(deletedIdx) {
+  const chunks = state.jazz.chunks;
+  for (const c of chunks) {
+    if (!c.fields) continue;
+    const f = c.fields;
+
+    // StateMachine
+    if (f.actorDefs)  f.actorDefs  = f.actorDefs.map(i => updateIdxRef(i, deletedIdx));
+    if (f.paramDefs)  f.paramDefs  = f.paramDefs.map(i => updateIdxRef(i, deletedIdx));
+    if (f.states)     f.states     = f.states.map(i => updateIdxRef(i, deletedIdx));
+    // State
+    if ('dgIndex' in f)   f.dgIndex    = updateIdxRef(f.dgIndex, deletedIdx);
+    if (f.transitions)    f.transitions = f.transitions.map(i => updateIdxRef(i, deletedIdx));
+    // DecisionGraph
+    if (f.allNodes)   f.allNodes   = f.allNodes.map(i => updateIdxRef(i, deletedIdx));
+    if (f.graphRoot)  f.graphRoot  = f.graphRoot.map(i => updateIdxRef(i, deletedIdx));
+    // Animation nodes
+    if (f.actions)    f.actions    = f.actions.map(i => updateIdxRef(i, deletedIdx));
+    if ('actorIdx' in f)  f.actorIdx  = updateIdxRef(f.actorIdx, deletedIdx);
+    if ('actorIdx2' in f) f.actorIdx2 = updateIdxRef(f.actorIdx2, deletedIdx);
+    if ('stateIdx' in f)  f.stateIdx  = updateIdxRef(f.stateIdx, deletedIdx);
+    // Random choices
+    if (f.choices) f.choices.forEach(c => { c.actions = c.actions.map(i => updateIdxRef(i, deletedIdx)); });
+  }
+  // Update selIdx
+  if (state.selIdx === deletedIdx) state.selIdx = null;
+  else if (state.selIdx > deletedIdx) state.selIdx--;
+  // Update treeExpanded
+  const newExp = new Set();
+  for (const idx of treeExpanded) {
+    if (idx === deletedIdx) continue;
+    newExp.add(idx > deletedIdx ? idx - 1 : idx);
+  }
+  treeExpanded.clear();
+  for (const i of newExp) treeExpanded.add(i);
+}
+
+// ─── Delete a chunk entirely from the file ───────────
+function deleteChunk(idx) {
+  const chunk = state.jazz.chunks[idx];
+  const name = `${chunk.typeName} #${idx}`;
+  confirmModal(
+    '🗑 Delete Chunk',
+    `Delete <b>${name}</b> from the file?<br><br>All references to this chunk will be nulled. This cannot be undone.`,
+    '🗑 Delete',
+    () => {
+      state.jazz.chunks.splice(idx, 1);
+      state.jazz.count--;
+      updateAllRefsAfterDelete(idx);
+      notify(`Deleted: ${name}`);
+      renderTree();
+      renderProps();
+    }
+  );
+}
+
+// ─── Delete a chunk AND all chunks it references (recursive) ───
+function deleteChunkDeep(idx, visited = new Set()) {
+  if (visited.has(idx)) return;
+  visited.add(idx);
+  const chunk = state.jazz.chunks[idx];
+  if (!chunk) return;
+  const f = chunk.fields;
+  if (f) {
+    // Collect children to delete first
+    const children = [];
+    if (chunk.type === 0x02eedb18) { // DecisionGraph → delete all nodes
+      (f.allNodes || []).forEach(i => { if (i !== null) children.push(i); });
+    }
+    if (f.actions) f.actions.forEach(i => { if (i !== null) children.push(i); });
+    if (f.choices) f.choices.forEach(c => c.actions.forEach(i => { if (i !== null) children.push(i); }));
+    // Delete children first (in reverse order to preserve indices)
+    children.sort((a, b) => b - a);
+    for (const ci of children) deleteChunkDeep(ci, visited);
+  }
+}
+
+function deleteChunkWithChildren(rootIdx) {
+  // Collect all chunks to delete
+  const toDelete = new Set();
+  function collect(idx) {
+    if (idx === null || idx === undefined || toDelete.has(idx)) return;
+    toDelete.add(idx);
+    const c = state.jazz.chunks[idx];
+    if (!c || !c.fields) return;
+    const f = c.fields;
+    if (c.type === 0x02eedb18) (f.allNodes || []).forEach(i => { if (i !== null) collect(i); });
+    if (f.actions) f.actions.forEach(i => { if (i !== null) collect(i); });
+    if (f.choices) f.choices.forEach(ch => ch.actions.forEach(i => { if (i !== null) collect(i); }));
+  }
+  collect(rootIdx);
+
+  const rootChunk = state.jazz.chunks[rootIdx];
+  const names = [...toDelete].map(i => `${state.jazz.chunks[i]?.typeName} #${i}`).join('<br>');
+  confirmModal(
+    '🗑 Delete with Children',
+    `Delete the following ${toDelete.size} chunk(s)?<br><br><span style="color:var(--error)">${names}</span><br><br>This cannot be undone.`,
+    `🗑 Delete ${toDelete.size} chunks`,
+    () => {
+      // Delete in descending index order so indices stay valid
+      const sorted = [...toDelete].sort((a, b) => b - a);
+      for (const idx of sorted) {
+        state.jazz.chunks.splice(idx, 1);
+        state.jazz.count--;
+        updateAllRefsAfterDelete(idx);
+        // Update remaining toDelete set indices
+        for (const [old] of toDelete.entries()) {
+          if (old > idx) { toDelete.delete(old); toDelete.add(old - 1); }
+        }
+      }
+      notify(`Deleted ${sorted.length} chunks`);
+      renderTree();
+      renderProps();
+    }
+  );
+}
+
+// ─── Detach DG from State (null the ref, keep chunk) ─
+function detachDGFromState(stateChunk) {
+  const dgIdx = stateChunk.fields.dgIndex;
+  if (dgIdx === null) return;
+  confirmModal(
+    '⚠ Detach Decision Graph',
+    `Detach DecisionGraph #${dgIdx} from this state?<br><br>The chunk stays in the file but the state will have no decision graph.`,
+    'Detach',
+    () => {
+      stateChunk.fields.dgIndex = null;
+      stateChunk.modified = true;
+      notify(`Detached DecisionGraph #${dgIdx} from state`);
+      renderTree();
+      renderProps();
+    }
+  );
+}
+
+// ─── Remove a node from DG's allNodes + graphRoot ────
+function removeNodeFromDG(dgChunk, nodeIdx) {
+  const f = dgChunk.fields;
+  f.allNodes  = f.allNodes.filter(i => i !== nodeIdx);
+  f.graphRoot = f.graphRoot.filter(i => i !== nodeIdx);
+  dgChunk.modified = true;
+}
+
+// ─── Remove a state from StateMachine.states ─────────
+function removeStateFromSM(smChunk, stateIdx) {
+  smChunk.fields.states = smChunk.fields.states.filter(i => i !== stateIdx);
+  smChunk.modified = true;
+}
+
+// ─── Remove a transition from State ──────────────────
+function removeTransitionFromState(stateChunk, targetIdx) {
+  stateChunk.fields.transitions = stateChunk.fields.transitions.filter(i => i !== targetIdx);
+  stateChunk.modified = true;
 }
 
 // ═══════════════════════════════════════════════════════
