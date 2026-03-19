@@ -1797,6 +1797,8 @@ function appendHexSection(panel, chunk) {
   hb.appendChild(hexDiv);
   panel.appendChild(hs);
 }
+
+function renderGenericProps(panel, chunk) {
   const { section: ps, body: pb } = section('📦 Editable Fields (uint32)');
 
   // Show all uint32 fields after FourCC+version as editable
