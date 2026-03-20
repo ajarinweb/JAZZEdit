@@ -520,31 +520,64 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
-/* ─── NAME DISPLAY ───────────────────────────────────────────── */
+/* ─── NAME DISPLAY — subtitle style ──────────────────────────── */
+/* Wrapper: stacks the input + subtitle vertically */
+.prop-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The subtitle line — floats below the hash input */
+.name-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--accent3);
+  opacity: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 2px;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.2s ease;
+  transform: translateY(-2px);
+  height: 0;
+  line-height: 1;
+}
+.name-sub.visible {
+  opacity: 0.6;
+  transform: translateY(0);
+  height: auto;
+  padding-top: 2px;
+  padding-bottom: 1px;
+}
+.name-sub::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 1px;
+  background: var(--accent3);
+  opacity: 0.4;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+/* name-tag: for tree / inline uses (kept minimal) */
 .name-tag {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
+  font-style: italic;
   color: var(--accent3);
-  opacity: 0.85;
-  margin-left: 6px;
+  opacity: 0.55;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
-  display: inline-block;
-  vertical-align: middle;
 }
-.name-tag::before { content: '≡ '; opacity: 0.5; }
-
-.prop-with-name {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  flex-wrap: nowrap;
-  flex: 1;
-}
-.prop-with-name .prop-input { flex: 0 0 auto; width: 200px; }
-.prop-with-name .name-tag { flex: 1; }
 
 /* name map side panel */
 .nm-entry {
@@ -1749,18 +1782,56 @@ function propRow(label, value, onChange, hint, readOnly) {
   row.appendChild(lbl);
 
   const valDiv = el('div', 'prop-value');
+
+  // Wrap input + subtitle together
+  const wrap = el('div', 'prop-input-wrap');
+
   const inp = document.createElement('input');
   inp.className = 'prop-input' + (readOnly ? ' readonly' : '');
   inp.type = 'text';
   inp.value = value;
   if (readOnly) inp.readOnly = true;
+
+  // Subtitle element — shows human-readable name
+  const sub = el('span', 'name-sub');
+  wrap.appendChild(inp);
+  wrap.appendChild(sub);
+
+  // Show subtitle for hash-shaped values (0x + 8 or 16 hex chars)
+  function updateSub(v) {
+    v = v.trim();
+    let name = null;
+    const m32 = v.match(/^0?[xX]?([0-9A-Fa-f]{8})$/);
+    const m64 = v.match(/^0?[xX]?([0-9A-Fa-f]{16})$/);
+    if (m32) name = lookupName(parseInt(m32[1], 16));
+    else if (m64) {
+      const hi = parseInt(m64[1].slice(0,8), 16);
+      const lo = parseInt(m64[1].slice(8,16), 16);
+      name = lookupName64(lo, hi);
+    }
+    if (name) {
+      sub.textContent = name;
+      sub.classList.add('visible');
+    } else {
+      sub.textContent = '';
+      sub.classList.remove('visible');
+    }
+  }
+
+  // Initial lookup
+  updateSub(value);
+
   if (onChange) {
     inp.addEventListener('change', e => {
       const ok = onChange(e.target.value);
       inp.classList.toggle('modified', ok === true);
+      updateSub(e.target.value);
     });
   }
-  valDiv.appendChild(inp);
+  // Live update while typing
+  inp.addEventListener('input', e => updateSub(e.target.value));
+
+  valDiv.appendChild(wrap);
 
   if (hint) {
     const h = el('span', 'prop-hint', hint);
@@ -1811,13 +1882,14 @@ function renderProps() {
 
   // Chunk info bar
   const infobar = el('div', 'chunk-infobar');
+  const instName = lookupName64(chunk.instance.lo, chunk.instance.hi);
   infobar.innerHTML = `
     <span class="ci-item">Index: <b>${chunk.index}</b></span>
     <span class="ci-item">Type: <b>${h8(chunk.type)}</b></span>
     <span class="ci-item">FourCC: <b>"${chunk.fourcc}"</b></span>
     <span class="ci-item">Ver: <b>${h8(chunk.chunkVer)}</b></span>
     <span class="ci-item">Size: <b>${chunk.rawData.length} B</b></span>
-    <span class="ci-item">Instance: <b>${h64(chunk.instance.lo, chunk.instance.hi)}</b></span>
+    <span class="ci-item">Instance: <b>${h64(chunk.instance.lo, chunk.instance.hi)}</b>${instName ? ` <span class="name-tag">${instName}</span>` : ''}</span>
   `;
   // Clone button in infobar
   const cloneBtn = el('button', 'btn-action btn-add', '⧉ Clone');
@@ -2156,8 +2228,9 @@ function renderDGProps(panel, chunk) {
         let sub = `#${idx}`;
         if (nc?.type === 0x02eedb5f && nc.fields?.clip)
           sub += '  ' + h64(nc.fields.clip.instance.lo, nc.fields.clip.instance.hi);
+        const nodeLabel = nc?.typeName || '?';
         return {
-          icon, label: nc?.typeName || '?', sub,
+          icon, label: nodeLabel, sub,
           onNav:   () => { state.selIdx = idx; renderTree(); renderProps(); },
           onMove:  () => uiMoveNodeToDG(chunk, idx),
           onDelete: () => confirmModal(
@@ -4219,7 +4292,7 @@ function updateNameCountBadge() {
 
 // ── Name display helpers ──────────────────────────────
 function nameTag(name) {
-  if (!name) return '';
+  if (!name) return null;
   const span = document.createElement('span');
   span.className = 'name-tag';
   span.textContent = name;
@@ -4227,19 +4300,9 @@ function nameTag(name) {
   return span;
 }
 
-// Wrap a propRow input to show name alongside hash
+// propRowWithName — now just wraps propRow since names are shown automatically
 function propRowWithName(label, hash, onChange, hint) {
-  const { row, input } = propRow(label, h8(hash), onChange, hint);
-  const name = lookupName(hash);
-  if (name) {
-    // insert name tag after input
-    const wrap = document.createElement('div');
-    wrap.className = 'prop-with-name';
-    input.parentNode.insertBefore(wrap, input);
-    wrap.appendChild(input);
-    wrap.appendChild(nameTag(name));
-  }
-  return { row, input };
+  return propRow(label, h8(hash), onChange, hint);
 }
 
 // ── Parse name map file ───────────────────────────────
