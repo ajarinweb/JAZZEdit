@@ -45,14 +45,11 @@ body {
 #topbar {
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
-  padding: 0 16px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
   flex-shrink: 0;
   position: relative;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
 }
 
 #topbar::after {
@@ -63,42 +60,116 @@ body {
   background: linear-gradient(90deg, var(--accent2), var(--accent), transparent 60%);
 }
 
+/* Row 1: identity + file + save */
+#topbar-row1 {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 44px;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Row 2: tool strip — only visible when file loaded */
+#topbar-row2 {
+  display: none;
+  align-items: center;
+  padding: 0 16px;
+  height: 34px;
+  gap: 2px;
+}
+#topbar-row2.active { display: flex; }
+
+/* Logo */
 .logo {
   font-family: 'Rajdhani', sans-serif;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 17px;
   letter-spacing: 2px;
   color: var(--accent2);
   text-transform: uppercase;
-  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.logo-sub {
+  color: var(--text3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  margin-left: 2px;
+}
+
+/* Divider between logo and file info */
+.tb-divider {
+  width: 1px; height: 20px;
+  background: var(--border);
+  margin: 0 12px;
+  flex-shrink: 0;
+}
+
+/* File info area */
+#tb-fileinfo {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
-.logo-sub { color: var(--text2); font-size: 12px; font-weight: 400; letter-spacing: 1px; }
+.topbar-file {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
 
+/* Save-as dropdown (compact) */
+.ver-switch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text3);
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+.ver-switch select {
+  background: var(--bg);
+  color: var(--text2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+/* Badge */
 .badge {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 3px;
   letter-spacing: 1px;
   font-weight: 700;
+  flex-shrink: 0;
 }
 .badge-v2 { background: #1a3a1a; color: #69ffb4; border: 1px solid #1a4a1a; }
 .badge-v3 { background: #3a1a1a; color: #ff8a80; border: 1px solid #4a1a1a; }
 .badge-info { background: #1a2a3a; color: var(--accent); border: 1px solid #1a354a; }
 
-.topbar-file {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text2);
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Row1 right-side buttons */
+.tb-r1-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
+/* Primary buttons (row 1) */
 .btn {
   font-family: 'Rajdhani', sans-serif;
   font-weight: 600;
@@ -114,9 +185,9 @@ body {
 .btn-open {
   background: var(--bg3);
   color: var(--accent);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border);
 }
-.btn-open:hover { background: rgba(79, 195, 247, 0.1); }
+.btn-open:hover { background: rgba(79,195,247,0.08); border-color: var(--accent); }
 .btn-save {
   background: var(--accent2);
   color: white;
@@ -124,23 +195,56 @@ body {
 .btn-save:hover { background: #6366f1; }
 .btn-save:disabled { background: var(--bg3); color: var(--text3); cursor: default; border: 1px solid var(--border); }
 
-/* ─── VERSION SWITCH ───────────────────────────────── */
-.ver-switch {
+/* ─── TOOL STRIP (Row 2) ─────────────────────────── */
+/* Segmented groups with separators */
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px;
+  margin-right: 6px;
+}
+.tb-group:last-child { margin-right: 0; }
+
+.tb-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  border: none;
+  cursor: pointer;
+  color: var(--text2);
+  background: transparent;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
-  color: var(--text2);
+  height: 24px;
 }
-.ver-switch select {
-  background: var(--bg3);
+.tb-btn:hover:not(:disabled) {
+  background: var(--bg2);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 3px 6px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
 }
+.tb-btn:disabled { opacity: 0.35; cursor: default; }
+.tb-btn.active { background: var(--bg2); color: var(--accent); }
+
+/* specific btn colors */
+.tb-btn.undo-redo { color: var(--text3); }
+.tb-btn.undo-redo:hover:not(:disabled) { color: var(--accent2); }
+.tb-btn.validate  { }
+.tb-btn.validate:hover { color: var(--accent3) !important; }
+.tb-btn.export    { }
+.tb-btn.compare   { }
+.tb-btn.hash      { }
+.tb-btn.search    { }
+
+.tb-spacer { flex: 1; }
 
 /* ─── MAIN WORKSPACE ─────────────────────────────── */
 #workspace {
@@ -651,35 +755,60 @@ body {
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <div class="logo">
-    <span>🎭</span>
-    <span>Jazz<span style="color:var(--accent)">Edit</span></span>
-    <span class="logo-sub">Sims 3 · v2 &amp; v3</span>
+
+  <!-- Row 1: Logo · File info · Primary actions -->
+  <div id="topbar-row1">
+    <div class="logo">
+      <span>🎭</span>
+      <span>Jazz<span style="color:var(--accent)">Edit</span></span>
+      <span class="logo-sub">Sims 3</span>
+    </div>
+
+    <div class="tb-divider"></div>
+
+    <div id="tb-fileinfo">
+      <span id="fileBadge" class="topbar-file"></span>
+      <span id="versionBadge"></span>
+      <div class="ver-switch" id="verSwitch" style="display:none">
+        <span>Save as:</span>
+        <select id="saveVersion">
+          <option value="3">v3 (Game / SmoothJazz)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="tb-r1-btns">
+      <label for="fileInput" class="btn btn-open" style="padding:5px 14px;font-size:12px">📂 Open</label>
+      <input type="file" id="fileInput" accept=".jazz" style="display:none">
+      <input type="file" id="compareInput" accept=".jazz" style="display:none">
+      <button class="btn btn-save" id="saveBtn" disabled style="padding:5px 18px;font-size:12px">💾 Save</button>
+    </div>
   </div>
 
-  <span id="fileBadge" class="topbar-file" style="display:none"></span>
-  <span id="versionBadge"></span>
+  <!-- Row 2: Tool strip — shown after file load -->
+  <div id="topbar-row2">
 
-  <div class="ver-switch" id="verSwitch" style="display:none">
-    <span>Save as:</span>
-    <select id="saveVersion">
-      <option value="3">v3 (Game / SmoothJazz)</option>
-    </select>
+    <!-- History group -->
+    <div class="tb-group">
+      <button class="tb-btn undo-redo" id="btnUndo" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
+      <button class="tb-btn undo-redo" id="btnRedo" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
+    </div>
+
+    <!-- Analysis group -->
+    <div class="tb-group">
+      <button class="tb-btn validate" id="btnValidate" title="Validate — check broken refs & orphans">✓ Validate</button>
+      <button class="tb-btn search"   id="btnSearch"   title="Search by hash across all chunks">⌕ Search</button>
+      <button class="tb-btn hash"     id="btnHash"     title="FNV Hash Calculator"># Hash</button>
+    </div>
+
+    <!-- Export/compare group -->
+    <div class="tb-group">
+      <button class="tb-btn export"  id="btnExport"  title="Export as text script">↗ Export</button>
+      <button class="tb-btn compare" id="btnCompare" title="Compare with another .jazz file">⚖ Compare</button>
+    </div>
+
   </div>
 
-  <div id="toolbtns" style="display:flex;gap:6px;display:none">
-    <button class="btn btn-open" id="btnUndo"     title="Undo (Ctrl+Z)"  disabled>↩ Undo</button>
-    <button class="btn btn-open" id="btnRedo"     title="Redo (Ctrl+Y)"  disabled>↪ Redo</button>
-    <button class="btn btn-open" id="btnValidate" title="Validate file">✅ Validate</button>
-    <button class="btn btn-open" id="btnExport"   title="Export as text script">📄 Export</button>
-    <button class="btn btn-open" id="btnCompare"  title="Compare with another .jazz file">⚖ Compare</button>
-  </div>
-  <button class="btn btn-open" id="btnHash"    title="FNV Hash Calculator">🔢 Hash Calc</button>
-  <button class="btn btn-open" id="btnSearch"  title="Search by hash">🔍 Search</button>
-  <label for="fileInput" class="btn btn-open">📂 Open .jazz</label>
-  <input type="file" id="fileInput" accept=".jazz" style="display:none">
-  <input type="file" id="compareInput" accept=".jazz" style="display:none">
-  <button class="btn btn-save" id="saveBtn" disabled>💾 Save</button>
 </div>
 
 <!-- MAIN -->
@@ -3161,8 +3290,7 @@ function loadFile(file) {
 
       document.getElementById('saveBtn').disabled = false;
       document.getElementById('verSwitch').style.display = '';
-      document.getElementById('fileBadge').style.display = '';
-      document.getElementById('toolbtns').style.display = '';
+      document.getElementById('topbar-row2').classList.add('active');
       document.getElementById('fileBadge').textContent = file.name;
 
       const v = state.jazz.version;
