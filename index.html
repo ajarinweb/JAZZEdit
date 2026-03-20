@@ -416,6 +416,30 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+/* ─── DRAG REORDER ───────────────────────────────────────────── */
+.sortable-list { display:flex; flex-direction:column; gap:2px; }
+.sortable-item {
+  display:flex; align-items:center; gap:6px;
+  padding:5px 8px; border-radius:4px;
+  background:var(--bg3); border:1px solid transparent;
+  cursor:grab; user-select:none; transition:background 0.1s, border-color 0.1s;
+  font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text2);
+}
+.sortable-item:active { cursor:grabbing; }
+.sortable-item.drag-over { border-color:var(--accent2); background:rgba(124,131,253,0.1); }
+.sortable-item.dragging  { opacity:0.4; }
+.sort-grip { color:var(--text3); font-size:13px; flex-shrink:0; cursor:grab; }
+.sort-icon { flex-shrink:0; }
+.sort-label { flex:1; }
+.sort-sub   { color:var(--text3); font-size:10px; }
+.sort-btn-del { margin-left:4px; opacity:0; color:var(--error); padding:0 4px; border-radius:3px; font-size:12px; transition:opacity 0.1s; flex-shrink:0; }
+.sortable-item:hover .sort-btn-del { opacity:1; }
+.sort-btn-del:hover { background:rgba(255,107,107,0.15); }
+.sort-btn-move { opacity:0; color:var(--accent); padding:0 4px; border-radius:3px; font-size:12px; transition:opacity 0.1s; flex-shrink:0; cursor:pointer; }
+.sortable-item:hover .sort-btn-move { opacity:1; }
+.sort-btn-move:hover { background:rgba(79,195,247,0.15); }
+
+
 /* ─── PICKER & FORM MODALS ───────────────────────────────────── */
 #picker-overlay, #form-overlay {
   display:none; position:fixed; inset:0;
@@ -1519,26 +1543,29 @@ function renderStateMachineProps(panel, chunk) {
 
   panel.appendChild(ps);
 
-  // States list
-  const { section: sts, body: stb } = section(`📌 States (${f.states.length})`);
-  f.states.forEach((idx, i) => {
-    if (idx === null) return;
-    const sc = all[idx];
-    if (!sc) return;
-    const nameHash = sc.fields ? h8(sc.fields.stateName) : '?';
-    const li = linkItemDel(
-      '📌', `State ${nameHash}`, `#${idx}`,
-      () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
-      () => {
-        removeStateFromSM(chunk, idx);
-        notify(`Removed State #${idx} from StateMachine (chunk not deleted)`);
-        renderTree(); renderProps();
-      }
-    );
-    stb.appendChild(li);
-  });
-  if (f.states.length === 0) stb.appendChild(el('div', 'no-items', 'No states'));
-  // Add State button
+  // States list — sortable
+  const { section: sts, body: stb } = section(`📌 States (${f.states.length}) — drag to reorder`);
+  if (f.states.length === 0) {
+    stb.appendChild(el('div', 'no-items', 'No states'));
+  } else {
+    const stateItems = f.states
+      .map((idx) => ({ idx }))
+      .filter(({ idx }) => idx !== null && all[idx])
+      .map(({ idx }) => {
+        const sc = all[idx];
+        const nameHash = sc.fields ? h8(sc.fields.stateName) : '?';
+        return {
+          icon: '📌', label: `State ${nameHash}`, sub: `#${idx}`,
+          onNav:    () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
+          onDelete: () => {
+            removeStateFromSM(chunk, idx);
+            notify(`Removed State #${idx} from StateMachine`);
+            renderTree(); renderProps();
+          },
+        };
+      });
+    stb.appendChild(makeSortableList(f.states, stateItems, () => { chunk.modified = true; }));
+  }
   const smBar = el('div', 'action-bar');
   const btnAddState = el('button', 'btn-action btn-add', '✚ Add New State');
   btnAddState.onclick = () => uiAddStateToSM();
@@ -1674,24 +1701,29 @@ function renderStateProps(panel, chunk) {
   }
   panel.appendChild(dgs);
 
-  // Transitions
-  const { section: trs, body: trb } = section(`➡ Transitions (${f.transitions.length})`, 'var(--state-color)');
-  f.transitions.forEach(idx => {
-    if (idx === null) return;
-    const tc = all[idx];
-    const nameHash = tc?.fields ? h8(tc.fields.stateName) : '?';
-    const li = linkItemDel(
-      '➡', `State ${nameHash}`, `#${idx}`,
-      () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
-      () => {
-        removeTransitionFromState(chunk, idx);
-        notify(`Removed transition to State #${idx}`);
-        renderTree(); renderProps();
-      }
-    );
-    trb.appendChild(li);
-  });
-  if (f.transitions.length === 0) trb.appendChild(el('div', 'no-items', 'Terminal state (no transitions)'));
+  // Transitions — sortable
+  const { section: trs, body: trb } = section(`➡ Transitions (${f.transitions.length}) — drag to reorder`, 'var(--state-color)');
+  if (f.transitions.length === 0) {
+    trb.appendChild(el('div', 'no-items', 'Terminal state (no transitions)'));
+  } else {
+    const transItems = f.transitions
+      .map(idx => ({ idx }))
+      .filter(({ idx }) => idx !== null)
+      .map(({ idx }) => {
+        const tc = all[idx];
+        const nameHash = tc?.fields ? h8(tc.fields.stateName) : '?';
+        return {
+          icon: '➡', label: `State ${nameHash}`, sub: `#${idx}`,
+          onNav:    () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
+          onDelete: () => {
+            removeTransitionFromState(chunk, idx);
+            notify(`Removed transition → State #${idx}`);
+            renderTree(); renderProps();
+          },
+        };
+      });
+    trb.appendChild(makeSortableList(f.transitions, transItems, () => { chunk.modified = true; }));
+  }
   const transBar = el('div', 'action-bar');
   const btnAddTrans = el('button', 'btn-action btn-add', '✚ Add Transition');
   btnAddTrans.onclick = () => uiAddTransition(chunk);
@@ -1735,38 +1767,52 @@ function renderDGProps(panel, chunk) {
   if (f.graphRoot.length === 0) rb.appendChild(el('div', 'no-items', 'No root nodes'));
   panel.appendChild(rs);
 
-  // All nodes — with per-node delete (remove from DG + delete chunk)
-  const { section: as, body: ab } = section(`📋 All Nodes (${f.allNodes.length})`, 'var(--node-color)');
-  f.allNodes.forEach((idx, i) => {
-    if (idx === null) return;
-    const nc = all[idx];
-    const icon = CHUNK_ICONS[nc?.typeName] || '📦';
-    const li = linkItemDel(
-      icon, `${nc?.typeName || '?'}`, `#${idx}`,
-      () => { state.selIdx = idx; renderTree(); renderProps(); },
-      () => {
-        confirmModal(
-          `🗑 Delete Node`,
-          `Delete ${nc?.typeName || '?'} #${idx} and remove from this DecisionGraph?`,
-          '🗑 Delete',
-          () => {
-            removeNodeFromDG(chunk, idx);
-            deleteChunk(idx);
-          }
-        );
-      }
-    );
-    ab.appendChild(li);
-  });
-  if (f.allNodes.length === 0) ab.appendChild(el('div', 'no-items', 'No nodes'));
+  // All nodes — sortable, with move + delete per node
+  const { section: as, body: ab } = section(`📋 All Nodes (${f.allNodes.length}) — drag to reorder`, 'var(--node-color)');
+
+  if (f.allNodes.length === 0) {
+    ab.appendChild(el('div', 'no-items', 'No nodes'));
+  } else {
+    const sortItems = f.allNodes
+      .map((idx, i) => ({ idx, i }))
+      .filter(({ idx }) => idx !== null)
+      .map(({ idx }) => {
+        const nc = all[idx];
+        const icon = CHUNK_ICONS[nc?.typeName] || '📦';
+        let sub = `#${idx}`;
+        if (nc?.type === 0x02eedb5f && nc.fields?.clip)
+          sub += '  ' + h64(nc.fields.clip.instance.lo, nc.fields.clip.instance.hi);
+        return {
+          icon, label: nc?.typeName || '?', sub,
+          onNav:   () => { state.selIdx = idx; renderTree(); renderProps(); },
+          onMove:  () => uiMoveNodeToDG(chunk, idx),
+          onDelete: () => confirmModal(
+            `🗑 Delete Node`,
+            `Delete ${nc?.typeName || '?'} #${idx} and remove from this DecisionGraph?`,
+            '🗑 Delete',
+            () => { removeNodeFromDG(chunk, idx); deleteChunk(idx); }
+          ),
+        };
+      });
+
+    const sortList = makeSortableList(f.allNodes, sortItems, () => { chunk.modified = true; });
+    ab.appendChild(sortList);
+  }
 
   // Bulk action bar
   const bulkBar = el('div', 'action-bar');
-  const btnAddNode = el('button', 'btn-action btn-add', '✚ Add Node');
+
+  const btnAddNode = el('button', 'btn-action btn-add', '✚ New Node');
   btnAddNode.onclick = () => uiAddNodeToDG(chunk);
   bulkBar.appendChild(btnAddNode);
-  const btnDelAll = el('button', 'btn-action btn-delete', '🗑 Delete ALL nodes');
-  btnDelAll.title = 'Delete all nodes in this DecisionGraph from the file';
+
+  const btnAssign = el('button', 'btn-action btn-add', '📎 Assign Existing');
+  btnAssign.title = 'Add an existing chunk from the file to this DG (no copy)';
+  btnAssign.onclick = () => uiAssignChunkToDG(chunk);
+  bulkBar.appendChild(btnAssign);
+
+  const btnDelAll = el('button', 'btn-action btn-delete', '🗑 Delete ALL');
+  btnDelAll.title = 'Delete all nodes from file';
   btnDelAll.onclick = () => {
     const nodesCopy = [...f.allNodes].filter(i => i !== null);
     if (!nodesCopy.length) return;
@@ -2726,6 +2772,159 @@ function finishAddNodeToDG(dgChunk, newIdx) {
   state.selIdx = newIdx;
   notify(`Added ${newChunk.typeName} #${newIdx} to DecisionGraph`);
   renderTree(); renderProps();
+}
+
+
+// ═══════════════════════════════════════════════════════
+// SORTABLE LIST (drag-to-reorder)
+// ═══════════════════════════════════════════════════════
+// arr      : the live array to mutate on reorder
+// items    : [{icon, label, sub, onNav, onDelete, onMove}]
+// onChange : called after every reorder
+function makeSortableList(arr, items, onChange) {
+  const list = document.createElement('div');
+  list.className = 'sortable-list';
+
+  function build() {
+    list.innerHTML = '';
+    items.forEach((item, i) => {
+      const row = document.createElement('div');
+      row.className = 'sortable-item';
+      row.draggable = true;
+      row.dataset.i = i;
+
+      const grip = document.createElement('span');
+      grip.className = 'sort-grip'; grip.textContent = '⠿';
+      const ico  = document.createElement('span');
+      ico.className = 'sort-icon'; ico.textContent = item.icon || '📦';
+      const lbl  = document.createElement('span');
+      lbl.className = 'sort-label'; lbl.textContent = item.label;
+      const sub  = document.createElement('span');
+      sub.className = 'sort-sub'; sub.textContent = item.sub || '';
+
+      row.appendChild(grip); row.appendChild(ico);
+      row.appendChild(lbl); row.appendChild(sub);
+
+      // Click to navigate
+      if (item.onNav) {
+        lbl.style.cursor = 'pointer';
+        lbl.style.color = 'var(--accent)';
+        lbl.addEventListener('click', e => { e.stopPropagation(); item.onNav(); });
+      }
+
+      // Move to other DG button
+      if (item.onMove) {
+        const mv = document.createElement('span');
+        mv.className = 'sort-btn-move'; mv.textContent = '→DG'; mv.title = 'Move to another DecisionGraph';
+        mv.addEventListener('click', e => { e.stopPropagation(); item.onMove(); });
+        row.appendChild(mv);
+      }
+
+      // Delete button
+      if (item.onDelete) {
+        const del = document.createElement('span');
+        del.className = 'sort-btn-del'; del.textContent = '✕'; del.title = 'Remove / delete';
+        del.addEventListener('click', e => { e.stopPropagation(); item.onDelete(); });
+        row.appendChild(del);
+      }
+
+      // Drag events
+      row.addEventListener('dragstart', e => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', i);
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        const from = parseInt(e.dataTransfer.getData('text/plain'));
+        const to   = parseInt(row.dataset.i);
+        if (from === to) return;
+        // Mutate the live array
+        const [moved] = arr.splice(from, 1);
+        arr.splice(to, 0, moved);
+        // Rebuild item list to reflect new order
+        const [movedItem] = items.splice(from, 1);
+        items.splice(to, 0, movedItem);
+        items.forEach((it, idx) => it._idx = idx);
+        if (onChange) onChange();
+        build();
+      });
+
+      list.appendChild(row);
+    });
+  }
+  build();
+  return list;
+}
+
+// ═══════════════════════════════════════════════════════
+// ASSIGN EXISTING CHUNK TO DG (Feature 5)
+// ═══════════════════════════════════════════════════════
+function uiAssignChunkToDG(dgChunk) {
+  const actionTypes = [0x02eedb5f, 0x0344d438, 0x02eedb70, 0x02eeebdd, 0x02eeebdc, 0x02eeebde, 0x02eedb92];
+  const existing = new Set(dgChunk.fields.allNodes.filter(i => i !== null));
+
+  const items = state.jazz.chunks
+    .filter(c => actionTypes.includes(c.type) && !existing.has(c.index))
+    .map(c => {
+      const icon = CHUNK_ICONS[c.typeName] || '📦';
+      let sub = `#${c.index}`;
+      if (c.type === 0x02eedb5f && c.fields?.clip)
+        sub += '  ' + h64(c.fields.clip.instance.lo, c.fields.clip.instance.hi);
+      return { icon, tag: c.typeName, label: c.typeName, sub, value: c.index };
+    });
+
+  if (!items.length) { notify('No assignable chunks available (all already in this DG)'); return; }
+
+  showPicker('📎 Assign existing chunk to DG', items, idx => {
+    // Add to allNodes & graphRoot (if not already a root)
+    if (!dgChunk.fields.allNodes.includes(idx)) dgChunk.fields.allNodes.push(idx);
+    if (!dgChunk.fields.graphRoot.includes(idx)) dgChunk.fields.graphRoot.push(idx);
+    dgChunk.modified = true;
+    notify(`Assigned chunk #${idx} to DecisionGraph`);
+    treeExpanded.add(dgChunk.index);
+    state.selIdx = dgChunk.index;
+    renderTree(); renderProps();
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// MOVE NODE TO ANOTHER DG (Feature 6)
+// ═══════════════════════════════════════════════════════
+function uiMoveNodeToDG(srcDGChunk, nodeIdx) {
+  const items = state.jazz.chunks
+    .filter(c => c.type === 0x02eedb18 && c !== srcDGChunk)
+    .map(c => ({
+      icon: '🔀', tag: `#${c.index}`,
+      label: `DecisionGraph #${c.index}`,
+      sub: `${c.fields?.allNodes?.length ?? '?'} nodes`,
+      value: c.index,
+    }));
+
+  if (!items.length) { notify('No other DecisionGraphs in file'); return; }
+
+  showPicker('↗ Move node to another DecisionGraph', items, targetDGIdx => {
+    const targetDG = state.jazz.chunks[targetDGIdx];
+    if (!targetDG || !targetDG.fields) return;
+
+    // Remove from source DG
+    srcDGChunk.fields.allNodes  = srcDGChunk.fields.allNodes.filter(i => i !== nodeIdx);
+    srcDGChunk.fields.graphRoot = srcDGChunk.fields.graphRoot.filter(i => i !== nodeIdx);
+    srcDGChunk.modified = true;
+
+    // Add to target DG
+    if (!targetDG.fields.allNodes.includes(nodeIdx))  targetDG.fields.allNodes.push(nodeIdx);
+    if (!targetDG.fields.graphRoot.includes(nodeIdx)) targetDG.fields.graphRoot.push(nodeIdx);
+    targetDG.modified = true;
+
+    notify(`Moved node #${nodeIdx} to DecisionGraph #${targetDGIdx}`);
+    state.selIdx = srcDGChunk.index;
+    renderTree(); renderProps();
+  });
 }
 
 // ═══════════════════════════════════════════════════════
