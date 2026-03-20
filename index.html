@@ -416,6 +416,86 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+/* ─── SIDE PANEL (search / hash / compare / export) ──────────── */
+#side-panel {
+  width: 340px; min-width: 240px;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  display: none; flex-direction: column;
+  overflow: hidden; flex-shrink: 0;
+}
+#side-panel.active { display: flex; }
+#side-panel-header {
+  display: flex; align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3); gap: 8px;
+  font-size: 11px; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--text3); font-weight:700;
+}
+#side-panel-header span { flex:1; }
+#side-panel-close { cursor:pointer; color:var(--text3); font-size:16px; line-height:1; }
+#side-panel-close:hover { color:var(--text); }
+#side-panel-body { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+
+/* hash calc */
+.hash-row { display:flex; gap:6px; }
+.hash-result {
+  font-family:'JetBrains Mono',monospace; font-size:12px;
+  color:var(--accent3); background:var(--bg); border:1px solid var(--border);
+  border-radius:3px; padding:6px 10px; display:flex;
+  justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;
+}
+.hash-result .hr-label { color:var(--text3); font-size:10px; }
+.hash-result .hr-copy { cursor:pointer; color:var(--accent); font-size:10px; }
+.hash-result .hr-copy:hover { text-decoration:underline; }
+
+/* search results */
+.search-result {
+  padding:6px 8px; border-radius:4px; cursor:pointer;
+  font-family:'JetBrains Mono',monospace; font-size:11px;
+  color:var(--text2); border:1px solid transparent;
+  transition:background 0.1s;
+}
+.search-result:hover { background:var(--bg3); border-color:var(--border); color:var(--text); }
+.search-result .sr-match { color:var(--warn); font-weight:700; }
+.search-result .sr-type  { color:var(--accent2); font-size:10px; }
+.search-result .sr-loc   { color:var(--text3); font-size:10px; }
+
+/* validate */
+.val-ok    { color:var(--ok); font-size:12px; font-family:'JetBrains Mono',monospace; }
+.val-warn  { color:var(--warn); font-size:12px; font-family:'JetBrains Mono',monospace; cursor:pointer; }
+.val-warn:hover { text-decoration:underline; }
+.val-error { color:var(--error); font-size:12px; font-family:'JetBrains Mono',monospace; cursor:pointer; }
+.val-error:hover { text-decoration:underline; }
+
+/* compare */
+.diff-added   { background:rgba(105,255,180,0.07); border-left:2px solid var(--accent3); }
+.diff-removed { background:rgba(255,107,107,0.07); border-left:2px solid var(--error); }
+.diff-changed { background:rgba(255,179,71,0.07);  border-left:2px solid var(--warn); }
+
+/* export */
+.export-box {
+  font-family:'JetBrains Mono',monospace; font-size:11px;
+  color:var(--text2); background:var(--bg); border:1px solid var(--border);
+  border-radius:4px; padding:10px; white-space:pre; overflow-x:auto;
+  max-height:60vh; overflow-y:auto; line-height:1.7;
+}
+.exp-kw   { color:var(--accent2); }
+.exp-name { color:var(--accent3); }
+.exp-hash { color:var(--warn); }
+.exp-ref  { color:var(--accent); }
+.exp-cmt  { color:var(--text3); }
+
+/* undo indicator */
+#undoBar {
+  display:none; position:fixed; top:54px; left:50%; transform:translateX(-50%);
+  background:var(--bg3); border:1px solid var(--border);
+  padding:4px 14px; border-radius:4px; font-size:11px; color:var(--text2);
+  font-family:'JetBrains Mono',monospace; z-index:50; pointer-events:none;
+}
+
+
 /* ─── DRAG REORDER ───────────────────────────────────────────── */
 .sortable-list { display:flex; flex-direction:column; gap:2px; }
 .sortable-item {
@@ -587,12 +667,24 @@ body {
     </select>
   </div>
 
+  <div id="toolbtns" style="display:flex;gap:6px;display:none">
+    <button class="btn btn-open" id="btnUndo"     title="Undo (Ctrl+Z)"  disabled>↩ Undo</button>
+    <button class="btn btn-open" id="btnRedo"     title="Redo (Ctrl+Y)"  disabled>↪ Redo</button>
+    <button class="btn btn-open" id="btnValidate" title="Validate file">✅ Validate</button>
+    <button class="btn btn-open" id="btnExport"   title="Export as text script">📄 Export</button>
+    <button class="btn btn-open" id="btnCompare"  title="Compare with another .jazz file">⚖ Compare</button>
+  </div>
+  <button class="btn btn-open" id="btnHash"    title="FNV Hash Calculator">🔢 Hash Calc</button>
+  <button class="btn btn-open" id="btnSearch"  title="Search by hash">🔍 Search</button>
   <label for="fileInput" class="btn btn-open">📂 Open .jazz</label>
   <input type="file" id="fileInput" accept=".jazz" style="display:none">
+  <input type="file" id="compareInput" accept=".jazz" style="display:none">
   <button class="btn btn-save" id="saveBtn" disabled>💾 Save</button>
 </div>
 
 <!-- MAIN -->
+<div id="undoBar"></div>
+
 <div id="workspace">
 
   <!-- TREE PANEL -->
@@ -614,6 +706,15 @@ body {
       <div class="es-title">No File Loaded</div>
       <div class="es-sub">Open a .jazz file to begin editing</div>
     </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div id="side-panel">
+    <div id="side-panel-header">
+      <span id="side-panel-title">Panel</span>
+      <span id="side-panel-close" title="Close">✕</span>
+    </div>
+    <div id="side-panel-body"></div>
   </div>
 
 </div>
@@ -1483,6 +1584,7 @@ function renderProps() {
   else if (chunk.type === 0x02eeebdd) renderPropProps(panel, chunk);
   else if (chunk.type === 0x02eeebdc) renderNextStateProps(panel, chunk);
   else if (chunk.type === 0x02eeebde) renderActorOpProps(panel, chunk);
+  else if (chunk.type === 0x02eedb92) renderSelectOnParamProps(panel, chunk);
   else renderGenericProps(panel, chunk);
 }
 
@@ -1505,6 +1607,19 @@ function renderStateMachineProps(panel, chunk) {
 
   // Editable fields
   const { section: ps, body: pb } = section('⚙ Properties', 'var(--sm-color)');
+
+  // Instance ID (64-bit) — affects AcquireStateMachine lookup
+  const instHex = h64(chunk.instance.lo, chunk.instance.hi);
+  const instRow = propRow('Instance ID (64-bit)', instHex, v => {
+    const s = v.trim().replace(/^0x/i,'').padStart(16,'0');
+    const hi = parseInt(s.slice(0,8),16);
+    const lo = parseInt(s.slice(8,16),16);
+    if (isNaN(hi)||isNaN(lo)) return;
+    chunk.instance = {lo: lo>>>0, hi: hi>>>0};
+    chunk.modified = true; return true;
+  }, 'used by AcquireStateMachine()');
+  pb.appendChild(instRow.row);
+
   const nameRow = propRow('Name Hash', h8(f.name), v => {
     const n = parseHex(v);
     if (n === null) return;
@@ -2131,6 +2246,109 @@ function appendHexSection(panel, chunk) {
   hexDiv.innerHTML = hexDump(chunk.rawData);
   hb.appendChild(hexDiv);
   panel.appendChild(hs);
+}
+
+function renderSelectOnParamProps(panel, chunk) {
+  const f = chunk.fields;
+  const all = state.jazz.chunks;
+  if (!f) { renderGenericProps(panel, chunk); return; }
+
+  const { section: ps, body: pb } = section('🔧 SelectOnParameter', 'var(--actor-color)');
+
+  // Parameter ref
+  const paramRow = el('div', 'prop-row');
+  paramRow.innerHTML = '<span class="prop-label">Parameter</span>';
+  const pv = el('div', 'prop-value');
+  if (f.paramIdx !== null && all[f.paramIdx]) {
+    pv.appendChild(linkItem('⚙', `ParamDef #${f.paramIdx}`, h8(all[f.paramIdx].fields?.paramName||0), () => {
+      state.selIdx = f.paramIdx; renderTree(); renderProps();
+    }));
+  } else {
+    pv.appendChild(el('span', 'prop-hint', '(none)'));
+  }
+  paramRow.appendChild(pv);
+  pb.appendChild(paramRow);
+  panel.appendChild(ps);
+
+  // Cases
+  (f.cases||[]).forEach((cas, ci) => {
+    const { section: cs, body: cb } = section(`📋 Case ${ci} — value: ${h8(cas.value)}`);
+
+    const vr = propRow('Match Value', h8(cas.value), v => {
+      const n = parseHex(v); if (n === null) return;
+      pushUndo(`Edit Case ${ci} value`);
+      cas.value = n; chunk.modified = true; return true;
+    }, 'uint32');
+    cb.appendChild(vr.row);
+
+    // Actions for this case
+    if (cas.actions?.length) {
+      const actTitle = el('div', 'prop-hint', `Actions (${cas.actions.length}):`);
+      actTitle.style.marginTop = '6px';
+      cb.appendChild(actTitle);
+      cas.actions.forEach(idx => {
+        if (idx === null) return;
+        const nc = all[idx];
+        const icon = CHUNK_ICONS[nc?.typeName] || '📦';
+        cb.appendChild(linkItemDel(
+          icon, nc?.typeName||'?', `#${idx}`,
+          () => { state.selIdx = idx; renderTree(); renderProps(); },
+          () => {
+            pushUndo('Remove action from case');
+            cas.actions = cas.actions.filter(i => i !== idx);
+            chunk.modified = true;
+            renderProps();
+          }
+        ));
+      });
+    }
+
+    // Add action to case button
+    const cBar = el('div', 'action-bar');
+    const btnAdd = el('button', 'btn-action btn-add', '✚ Add Action');
+    btnAdd.onclick = () => {
+      const actionTypes = [0x02eedb5f, 0x0344d438, 0x02eedb70, 0x02eeebdc, 0x02eeebde];
+      const items = all
+        .filter(c => actionTypes.includes(c.type))
+        .map(c => ({ icon: CHUNK_ICONS[c.typeName]||'📦', tag: c.typeName, label: c.typeName, sub: `#${c.index}`, value: c.index }));
+      showPicker('Add action to case', items, idx => {
+        pushUndo('Add action to case');
+        if (!cas.actions) cas.actions = [];
+        cas.actions.push(idx);
+        chunk.modified = true;
+        renderProps();
+      });
+    };
+    cBar.appendChild(btnAdd);
+
+    const btnDel = el('button', 'btn-action btn-delete', '🗑 Remove Case');
+    btnDel.onclick = () => confirmModal('Remove Case', `Remove case ${ci} (value ${h8(cas.value)})?`, 'Remove', () => {
+      f.cases.splice(ci, 1); chunk.modified = true; renderProps();
+    });
+    cBar.appendChild(btnDel);
+    cs.appendChild(cBar);
+    panel.appendChild(cs);
+  });
+
+  // Add new case button
+  const topBar = el('div', 'action-bar');
+  const btnAddCase = el('button', 'btn-action btn-add', '✚ Add Case');
+  btnAddCase.onclick = () => {
+    showForm('Add Case', '✚ Add', [
+      { id:'val', label:'Match Value (hex)', type:'text', value:'0x00000000', placeholder:'0x00000001' },
+    ], vals => {
+      const n = parseHex(vals.val);
+      if (n === null) { alert('Invalid value'); return false; }
+      pushUndo('Add SelectOnParam case');
+      if (!f.cases) f.cases = [];
+      f.cases.push({ value: n, actions: [] });
+      chunk.modified = true;
+      renderProps();
+    });
+  };
+  topBar.appendChild(btnAddCase);
+  panel.appendChild(topBar);
+  appendHexSection(panel, chunk);
 }
 
 function renderGenericProps(panel, chunk) {
@@ -2944,6 +3162,7 @@ function loadFile(file) {
       document.getElementById('saveBtn').disabled = false;
       document.getElementById('verSwitch').style.display = '';
       document.getElementById('fileBadge').style.display = '';
+      document.getElementById('toolbtns').style.display = '';
       document.getElementById('fileBadge').textContent = file.name;
 
       const v = state.jazz.version;
@@ -3021,6 +3240,670 @@ document.getElementById('fileInput').addEventListener('change', e => {
 
 // Save button
 document.getElementById('saveBtn').addEventListener('click', saveFile);
+
+
+// ═══════════════════════════════════════════════════════
+// SIDE PANEL ENGINE
+// ═══════════════════════════════════════════════════════
+let activeSidePanel = null;
+
+function openSidePanel(title, buildFn) {
+  const panel = document.getElementById('side-panel');
+  const body  = document.getElementById('side-panel-body');
+  document.getElementById('side-panel-title').textContent = title;
+  body.innerHTML = '';
+  activeSidePanel = title;
+  buildFn(body);
+  panel.classList.add('active');
+}
+function closeSidePanel() {
+  document.getElementById('side-panel').classList.remove('active');
+  activeSidePanel = null;
+}
+document.getElementById('side-panel-close').addEventListener('click', closeSidePanel);
+
+// ═══════════════════════════════════════════════════════
+// UNDO / REDO
+// ═══════════════════════════════════════════════════════
+const undoStack = [];
+const redoStack = [];
+const MAX_UNDO = 40;
+
+function pushUndo(label) {
+  if (!state.jazz) return;
+  const snap = JSON.stringify(state.jazz.chunks.map(c => ({
+    fields: c.fields, instance: c.instance, modified: c.modified, isNew: c.isNew,
+  })));
+  undoStack.push({ label, snap, selIdx: state.selIdx, count: state.jazz.count });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack.length = 0;
+  updateUndoUI();
+}
+
+function applySnapshot(entry) {
+  const parsed = JSON.parse(entry.snap);
+  parsed.forEach((s, i) => {
+    if (state.jazz.chunks[i]) {
+      state.jazz.chunks[i].fields   = s.fields;
+      state.jazz.chunks[i].instance = s.instance;
+      state.jazz.chunks[i].modified = s.modified;
+      state.jazz.chunks[i].isNew    = s.isNew;
+    }
+  });
+  state.jazz.count = entry.count;
+  state.selIdx = entry.selIdx;
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  // Save current to redo
+  const cur = JSON.stringify(state.jazz.chunks.map(c => ({
+    fields: c.fields, instance: c.instance, modified: c.modified, isNew: c.isNew,
+  })));
+  redoStack.push({ label: 'redo', snap: cur, selIdx: state.selIdx, count: state.jazz.count });
+  const entry = undoStack.pop();
+  applySnapshot(entry);
+  updateUndoUI();
+  showUndoBar('↩ Undo: ' + entry.label);
+  renderTree(); renderProps();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  const cur = JSON.stringify(state.jazz.chunks.map(c => ({
+    fields: c.fields, instance: c.instance, modified: c.modified, isNew: c.isNew,
+  })));
+  undoStack.push({ label: 'redo', snap: cur, selIdx: state.selIdx, count: state.jazz.count });
+  const entry = redoStack.pop();
+  applySnapshot(entry);
+  updateUndoUI();
+  showUndoBar('↪ Redo: ' + entry.label);
+  renderTree(); renderProps();
+}
+
+function updateUndoUI() {
+  const bu = document.getElementById('btnUndo');
+  const br = document.getElementById('btnRedo');
+  bu.disabled = undoStack.length === 0;
+  br.disabled = redoStack.length === 0;
+  bu.title = undoStack.length ? `Undo: ${undoStack[undoStack.length-1].label}` : 'Nothing to undo';
+  br.title = redoStack.length ? `Redo: ${redoStack[redoStack.length-1].label}` : 'Nothing to redo';
+}
+
+let undoBarTimer = null;
+function showUndoBar(msg) {
+  const b = document.getElementById('undoBar');
+  b.textContent = msg; b.style.display = 'block';
+  clearTimeout(undoBarTimer);
+  undoBarTimer = setTimeout(() => b.style.display = 'none', 1800);
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey||e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+  if ((e.ctrlKey||e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redo(); }
+});
+
+document.getElementById('btnUndo').addEventListener('click', undo);
+document.getElementById('btnRedo').addEventListener('click', redo);
+
+// Patch pushUndo into every destructive action — wrap confirm modal
+const _origConfirmModal = confirmModal;
+window.confirmModal = function(title, msg, label, onConfirm) {
+  _origConfirmModal(title, msg, label, () => { pushUndo(label); onConfirm(); });
+};
+
+// ═══════════════════════════════════════════════════════
+// FNV HASH CALCULATOR
+// ═══════════════════════════════════════════════════════
+function fnv32(str) {
+  let h = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+function fnv32Lower(str) { return fnv32(str.toLowerCase()); }
+function fnv64(str) {
+  // FNV-1a 64-bit via two 32-bit halves
+  let lo = 0x84222325 >>> 0, hi = 0xcbf29ce4 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    lo ^= c;
+    // multiply by 0x00000100000001B3
+    const lo2 = Math.imul(lo, 0x01000193) >>> 0;
+    const hi2 = (Math.imul(hi, 0x01000193) + Math.imul(lo, 0x00000100) + (lo2 < lo ? 1 : 0)) >>> 0;
+    lo = lo2; hi = hi2;
+  }
+  return { lo, hi };
+}
+
+function openHashCalc() {
+  openSidePanel('🔢 FNV Hash Calculator', body => {
+    const inp = document.createElement('input');
+    inp.className = 'form-input'; inp.placeholder = 'Enter string (e.g. StateName)';
+    inp.style.marginBottom = '8px';
+    body.appendChild(inp);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+    const btnCalc = document.createElement('button');
+    btnCalc.className = 'btn btn-action btn-add'; btnCalc.textContent = '# Calculate';
+    btnCalc.style.flex = '1';
+    btnRow.appendChild(btnCalc);
+    const btnClear = document.createElement('button');
+    btnClear.className = 'btn btn-open'; btnClear.textContent = '✕';
+    btnClear.onclick = () => { inp.value = ''; results.innerHTML = ''; };
+    btnRow.appendChild(btnClear);
+    body.appendChild(btnRow);
+
+    const results = document.createElement('div');
+    results.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    body.appendChild(results);
+
+    // History section
+    const histTitle = document.createElement('div');
+    histTitle.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-top:8px;';
+    histTitle.textContent = 'Recent';
+    body.appendChild(histTitle);
+    const histList = document.createElement('div');
+    histList.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+    body.appendChild(histList);
+
+    const hashHistory = [];
+
+    function calcAndShow() {
+      const s = inp.value;
+      if (!s) return;
+      const f32  = fnv32(s);
+      const f32l = fnv32Lower(s);
+      const f64  = fnv64(s);
+      const f64l = fnv64(s.toLowerCase());
+
+      results.innerHTML = '';
+
+      function makeResult(label, valHex) {
+        const d = document.createElement('div');
+        d.className = 'hash-result';
+        d.innerHTML = `<span><span class="hr-label">${label}</span><br><b>${valHex}</b></span><span class="hr-copy" title="Copy">📋</span>`;
+        d.querySelector('.hr-copy').onclick = () => { navigator.clipboard?.writeText(valHex); notify(`Copied: ${valHex}`); };
+        return d;
+      }
+
+      results.appendChild(makeResult('FNV32 (exact case)', h8(f32)));
+      results.appendChild(makeResult('FNV32 (lowercase)', h8(f32l)));
+      results.appendChild(makeResult('FNV64 (exact case)', h64(f64.lo, f64.hi)));
+      results.appendChild(makeResult('FNV64 (lowercase)', h64(f64l.lo, f64l.hi)));
+
+      // Add to history
+      if (!hashHistory.includes(s)) {
+        hashHistory.unshift(s);
+        if (hashHistory.length > 10) hashHistory.pop();
+        histList.innerHTML = '';
+        hashHistory.forEach(hs => {
+          const hd = document.createElement('div');
+          hd.style.cssText = 'padding:3px 6px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--text2);border-radius:3px;';
+          hd.textContent = hs;
+          hd.addEventListener('mouseenter', () => hd.style.background='var(--bg3)');
+          hd.addEventListener('mouseleave', () => hd.style.background='');
+          hd.onclick = () => { inp.value = hs; calcAndShow(); };
+          histList.appendChild(hd);
+        });
+      }
+    }
+
+    btnCalc.addEventListener('click', calcAndShow);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') calcAndShow(); });
+    setTimeout(() => inp.focus(), 50);
+  });
+}
+
+document.getElementById('btnHash').addEventListener('click', openHashCalc);
+
+// ═══════════════════════════════════════════════════════
+// SEARCH / FIND BY HASH
+// ═══════════════════════════════════════════════════════
+function searchJazz(query) {
+  if (!state.jazz) return [];
+  const q = query.trim().toLowerCase().replace(/^0x/i,'');
+  if (!q) return [];
+  const results = [];
+
+  state.jazz.chunks.forEach(c => {
+    if (!c.fields) return;
+    const f = c.fields;
+    const chunkName = c.typeName;
+
+    function check(fieldName, value, valueHex) {
+      if (!valueHex) return;
+      const vl = valueHex.toLowerCase().replace(/^0x/,'');
+      if (vl.includes(q)) {
+        results.push({ chunkIdx: c.index, chunkName, fieldName, value: valueHex });
+      }
+    }
+
+    // StateMachine
+    if (c.type === 0x02d5df13) {
+      check('Name', f.name, h8(f.name));
+      check('Instance ID', null, h64(c.instance.lo, c.instance.hi));
+    }
+    // State
+    if (c.type === 0x02eedafe) {
+      check('StateName', f.stateName, h8(f.stateName));
+    }
+    // ActorDefinition
+    if (c.type === 0x02eedb2f) {
+      check('ParameterName', f.parameterName, h8(f.parameterName));
+      check('DefaultValue', f.defaultValue, h8(f.defaultValue));
+    }
+    // ParameterDefinition
+    if (c.type === 0x02eedb46) {
+      check('ParamName', f.paramName, h8(f.paramName));
+    }
+    // PlayAnimation
+    if (c.type === 0x02eedb5f && f.clip) {
+      check('Clip.Instance', null, h64(f.clip.instance.lo, f.clip.instance.hi));
+      check('Clip.Type',     null, h8(f.clip.type));
+      check('StrData',       null, f.strData || null);
+    }
+    // Unknown generic fields - scan raw uint32s
+    if (!c.fields || Object.keys(c.fields).length === 0) {
+      const dv = new DataView(c.rawData.buffer, c.rawData.byteOffset, c.rawData.byteLength);
+      for (let i = 8; i+3 < c.rawData.length; i+=4) {
+        const v = dv.getUint32(i, true);
+        const vh = h8(v).toLowerCase().replace('0x','');
+        if (vh.includes(q)) {
+          check(`raw[+${i.toString(16)}]`, v, h8(v));
+          break;
+        }
+      }
+    }
+  });
+
+  return results;
+}
+
+function openSearch() {
+  openSidePanel('🔍 Search by Hash', body => {
+    const inp = document.createElement('input');
+    inp.className = 'form-input'; inp.placeholder = 'Hash fragment e.g. 42E0CFBC';
+    body.appendChild(inp);
+
+    const summary = document.createElement('div');
+    summary.style.cssText = 'font-size:10px;color:var(--text3);font-family:JetBrains Mono,monospace;min-height:16px;';
+    body.appendChild(summary);
+
+    const resList = document.createElement('div');
+    resList.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
+    body.appendChild(resList);
+
+    let searchTimer;
+    function doSearch() {
+      const q = inp.value.trim();
+      resList.innerHTML = '';
+      if (q.length < 2) { summary.textContent = 'Type at least 2 characters'; return; }
+      const results = searchJazz(q);
+      summary.textContent = `${results.length} match${results.length !== 1 ? 'es' : ''}`;
+      results.forEach(r => {
+        const d = document.createElement('div');
+        d.className = 'search-result';
+        d.innerHTML = `<div><span class="sr-type">${r.chunkName} #${r.chunkIdx}</span> <span class="sr-loc">${r.fieldName}</span></div><div class="sr-match">${r.value}</div>`;
+        d.onclick = () => {
+          state.selIdx = r.chunkIdx;
+          treeExpanded.add(r.chunkIdx);
+          renderTree(); renderProps();
+        };
+        resList.appendChild(d);
+      });
+    }
+
+    inp.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 200); });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(searchTimer); doSearch(); } });
+    setTimeout(() => inp.focus(), 50);
+  });
+}
+
+document.getElementById('btnSearch').addEventListener('click', openSearch);
+
+// ═══════════════════════════════════════════════════════
+// VALIDATE FILE
+// ═══════════════════════════════════════════════════════
+function validateJazz() {
+  if (!state.jazz) return [];
+  const issues = [];
+  const chunks = state.jazz.chunks;
+
+  chunks.forEach(c => {
+    if (!c.fields) return;
+    const f = c.fields;
+    const loc = `${c.typeName} #${c.index}`;
+
+    function checkRef(name, idx) {
+      if (idx === null || idx === undefined) return;
+      if (idx < 0 || idx >= chunks.length) issues.push({ sev:'error', msg:`${loc}: ${name} ref #${idx} is OUT OF BOUNDS`, idx: c.index });
+      else if (!chunks[idx]) issues.push({ sev:'error', msg:`${loc}: ${name} ref #${idx} is NULL`, idx: c.index });
+    }
+
+    // StateMachine
+    if (c.type === 0x02d5df13) {
+      (f.actorDefs||[]).forEach((i,n) => checkRef(`actorDefs[${n}]`, i));
+      (f.paramDefs||[]).forEach((i,n) => checkRef(`paramDefs[${n}]`, i));
+      (f.states||[]).forEach((i,n) => checkRef(`states[${n}]`, i));
+      if (f.sentinel !== 0xDEADBEEF) issues.push({ sev:'error', msg:`${loc}: Sentinel is ${h8(f.sentinel)}, expected 0xDEADBEEF`, idx: c.index });
+      if (c.instance.lo === 0 && c.instance.hi === 0) issues.push({ sev:'warn', msg:`${loc}: Instance ID is zero — AcquireStateMachine() may not find this`, idx: c.index });
+    }
+    // State
+    if (c.type === 0x02eedafe) {
+      checkRef('dgIndex', f.dgIndex);
+      (f.transitions||[]).forEach((i,n) => checkRef(`transitions[${n}]`, i));
+      if (f.dgIndex !== null && chunks[f.dgIndex]?.type !== 0x02eedb18)
+        issues.push({ sev:'error', msg:`${loc}: dgIndex #${f.dgIndex} is not a DecisionGraph`, idx: c.index });
+    }
+    // DecisionGraph
+    if (c.type === 0x02eedb18) {
+      (f.allNodes||[]).forEach((i,n) => checkRef(`allNodes[${n}]`, i));
+      (f.graphRoot||[]).forEach((i,n) => checkRef(`graphRoot[${n}]`, i));
+      (f.graphRoot||[]).forEach(i => {
+        if (i !== null && !(f.allNodes||[]).includes(i))
+          issues.push({ sev:'warn', msg:`${loc}: graphRoot #${i} not in allNodes`, idx: c.index });
+      });
+      if (f.sentinel !== 0xDEADBEEF) issues.push({ sev:'error', msg:`${loc}: Bad sentinel`, idx: c.index });
+    }
+    // PlayAnimation
+    if (c.type === 0x02eedb5f) {
+      if (f.actorIdx !== null) checkRef('actorIdx', f.actorIdx);
+      if (f.sentinel1 !== 0xDEADBEEF || f.sentinel2 !== 0xDEADBEEF || f.sentinel3 !== 0xDEADBEEF)
+        issues.push({ sev:'warn', msg:`${loc}: One or more sentinels are bad`, idx: c.index });
+    }
+    // Stop
+    if (c.type === 0x0344d438) {
+      if (f.actorIdx !== null) checkRef('actorIdx', f.actorIdx);
+    }
+  });
+
+  // Check for orphan chunks (not referenced by anything)
+  const referenced = new Set([0]); // SM always root
+  chunks.forEach(c => {
+    if (!c.fields) return;
+    const f = c.fields;
+    const addRef = i => { if (i !== null && i !== undefined) referenced.add(i); };
+    (f.actorDefs||[]).forEach(addRef); (f.paramDefs||[]).forEach(addRef);
+    (f.states||[]).forEach(addRef); (f.transitions||[]).forEach(addRef);
+    if (f.dgIndex !== undefined) addRef(f.dgIndex);
+    (f.allNodes||[]).forEach(addRef); (f.graphRoot||[]).forEach(addRef);
+    (f.actions||[]).forEach(addRef);
+    if (f.actorIdx !== undefined) addRef(f.actorIdx);
+    if (f.stateIdx !== undefined) addRef(f.stateIdx);
+    if (f.choices) f.choices.forEach(ch => (ch.actions||[]).forEach(addRef));
+  });
+  chunks.forEach((c, i) => {
+    if (!referenced.has(i))
+      issues.push({ sev:'warn', msg:`Chunk #${i} (${c.typeName}) is ORPHAN — not referenced by anything`, idx: i });
+  });
+
+  return issues;
+}
+
+function openValidate() {
+  openSidePanel('✅ Validate File', body => {
+    if (!state.jazz) { body.textContent = 'No file loaded'; return; }
+    const issues = validateJazz();
+    if (!issues.length) {
+      const ok = document.createElement('div');
+      ok.className = 'val-ok';
+      ok.textContent = `✅ All ${state.jazz.count} chunks look good!`;
+      body.appendChild(ok);
+      return;
+    }
+    const summary = document.createElement('div');
+    const errs  = issues.filter(i=>i.sev==='error').length;
+    const warns = issues.filter(i=>i.sev==='warn').length;
+    summary.style.cssText = 'font-size:12px;margin-bottom:8px;';
+    summary.innerHTML = `<span style="color:var(--error)">⛔ ${errs} error(s)</span>  <span style="color:var(--warn)">⚠ ${warns} warning(s)</span>`;
+    body.appendChild(summary);
+    issues.forEach(iss => {
+      const d = document.createElement('div');
+      d.className = iss.sev === 'error' ? 'val-error' : 'val-warn';
+      d.textContent = (iss.sev === 'error' ? '⛔ ' : '⚠ ') + iss.msg;
+      if (iss.idx !== undefined) {
+        d.onclick = () => { state.selIdx = iss.idx; treeExpanded.add(iss.idx); renderTree(); renderProps(); };
+      }
+      body.appendChild(d);
+    });
+  });
+}
+
+document.getElementById('btnValidate').addEventListener('click', openValidate);
+
+// ═══════════════════════════════════════════════════════
+// EXPORT AS TEXT SCRIPT (SmoothJazz-style)
+// ═══════════════════════════════════════════════════════
+function exportJazzScript() {
+  if (!state.jazz) return '';
+  const chunks = state.jazz.chunks;
+  const lines = [];
+  const seen  = new Set();
+
+  function ln(s, indent=0) { lines.push('  '.repeat(indent) + s); }
+  function kw(s)   { return `<span class="exp-kw">${s}</span>`; }
+  function nm(s)   { return `<span class="exp-name">${s}</span>`; }
+  function hx(s)   { return `<span class="exp-hash">${s}</span>`; }
+  function rf(s)   { return `<span class="exp-ref">${s}</span>`; }
+  function cmt(s)  { return `<span class="exp-cmt">// ${s}</span>`; }
+
+  function fmtHash(h) { return hx(h8(h)); }
+  function fmtIdx(i)  { return i !== null ? rf(`#${i}`) : hx('null'); }
+
+  function fmtNode(idx, depth) {
+    if (idx === null || seen.has(idx)) return;
+    const c = chunks[idx];
+    if (!c) return;
+    seen.add(idx);
+    const f = c.fields;
+
+    if (c.type === 0x02eedb5f) { // Play
+      const clip = f?.clip ? h64(f.clip.instance.lo, f.clip.instance.hi) : '?';
+      const str  = f?.strData ? ` ${cmt('Substitution: '+f.strData)}` : '';
+      ln(`${kw('Play')} ${hx(clip)}${str}`, depth);
+      if (f?.actorIdx !== null && f?.actorIdx !== undefined) ln(`  ${kw('for')} Actor ${fmtIdx(f.actorIdx)}`, depth);
+      (f?.actions||[]).forEach(i => fmtNode(i, depth+1));
+    } else if (c.type === 0x0344d438) { // Stop
+      const actor = f?.actorIdx !== null ? ` ${kw('for')} ${fmtIdx(f.actorIdx)}` : '';
+      ln(`${kw('Stop Animation')}${actor}`, depth);
+      (f?.actions||[]).forEach(i => fmtNode(i, depth+1));
+    } else if (c.type === 0x02eedb70) { // Random
+      ln(`${kw('Select Random')}`, depth);
+      (f?.choices||[]).forEach(ch => {
+        ln(`  ${kw('Weight')} ${hx(ch.weight?.toFixed(3)||'?')} {`, depth);
+        (ch.actions||[]).forEach(i => fmtNode(i, depth+2));
+        ln(`  }`, depth);
+      });
+    } else if (c.type === 0x02eeebdc) { // NextState
+      ln(`${kw('Next State')} ${fmtIdx(f?.stateIdx)}`, depth);
+    } else if (c.type === 0x02eeebdd) { // Prop
+      const cr = f?.catalogRef ? h64(f.catalogRef.instance.lo, f.catalogRef.instance.hi) : '?';
+      ln(`${kw('Create Prop')} ${hx(cr)} ${kw('as')} ${fmtIdx(f?.actorIdx)}`, depth);
+    } else {
+      ln(`${kw(c.typeName)} ${cmt('#'+idx)}`, depth);
+    }
+  }
+
+  function fmtState(idx) {
+    const c = chunks[idx];
+    if (!c?.fields) return;
+    const f = c.fields;
+    ln(`${kw('State')} ${fmtHash(f.stateName)} {`, 1);
+    const props = [];
+    if (f.stateProperties & 0x01) props.push('Loop');
+    if (f.stateProperties & 0x02) props.push('Persistent');
+    if (f.stateProperties & 0x04) props.push('Entry');
+    if (f.stateProperties & 0x08) props.push('Exit');
+    if (props.length) ln(`${kw('Properties')} ${props.join(' | ')}`, 2);
+    (f.transitions||[]).forEach(ti => {
+      const tc = chunks[ti];
+      if (tc?.fields) ln(`${kw('Transitions to')} ${fmtHash(tc.fields.stateName)}`, 2);
+    });
+    // DG
+    const dg = f.dgIndex !== null ? chunks[f.dgIndex] : null;
+    if (dg?.fields) {
+      ln(`${kw('Decision Graph')} {`, 2);
+      (dg.fields.graphRoot||[]).forEach(ni => { seen.clear(); fmtNode(ni, 3); });
+      ln(`}`, 2);
+    }
+    ln(`}`, 1);
+  }
+
+  const sm = chunks[0];
+  if (!sm?.fields) return '// No StateMachine';
+
+  ln(`${kw('State Machine')} ${fmtHash(sm.fields.name)} {`);
+  ln(`  ${cmt('Instance: '+h64(sm.instance.lo, sm.instance.hi))}`, 0);
+  (sm.fields.actorDefs||[]).forEach(ai => {
+    const ac = chunks[ai];
+    if (ac?.fields) ln(`  ${kw('Actor')} ${fmtHash(ac.fields.parameterName)}`, 0);
+  });
+  (sm.fields.paramDefs||[]).forEach(pi => {
+    const pc = chunks[pi];
+    if (pc?.fields) ln(`  ${kw('Parameter')} ${fmtHash(pc.fields.paramName)}`, 0);
+  });
+  (sm.fields.states||[]).forEach(si => fmtState(si));
+  ln(`}`);
+
+  return lines.join('\n');
+}
+
+function openExport() {
+  openSidePanel('📄 Export Script', body => {
+    if (!state.jazz) { body.textContent = 'No file loaded'; return; }
+    const topBar = document.createElement('div');
+    topBar.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+    const btnCopy = document.createElement('button');
+    btnCopy.className = 'btn btn-action btn-add'; btnCopy.textContent = '📋 Copy all';
+    const btnDl = document.createElement('button');
+    btnDl.className = 'btn btn-open'; btnDl.textContent = '⬇ Download .txt';
+    topBar.appendChild(btnCopy); topBar.appendChild(btnDl);
+    body.appendChild(topBar);
+
+    const box = document.createElement('div');
+    box.className = 'export-box';
+    const script = exportJazzScript();
+    box.innerHTML = script;
+    body.appendChild(box);
+
+    btnCopy.onclick = () => {
+      navigator.clipboard?.writeText(box.innerText);
+      notify('Script copied to clipboard');
+    };
+    btnDl.onclick = () => {
+      const blob = new Blob([box.innerText], {type:'text/plain'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (state.filename||'jazz').replace('.jazz','')+'.txt';
+      a.click();
+    };
+  });
+}
+
+document.getElementById('btnExport').addEventListener('click', openExport);
+
+// ═══════════════════════════════════════════════════════
+// COMPARE TWO .jazz FILES
+// ═══════════════════════════════════════════════════════
+let compareJazz = null;
+
+function openCompare() {
+  if (!state.jazz) { notify('Load a file first'); return; }
+  document.getElementById('compareInput').click();
+}
+
+document.getElementById('compareInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      compareJazz = parseJazz(ev.target.result);
+      compareJazz.filename = file.name;
+      showComparePanel();
+    } catch(err) { alert('Error loading compare file: ' + err.message); }
+    e.target.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+function showComparePanel() {
+  const a = state.jazz, b = compareJazz;
+  openSidePanel(`⚖ Compare: ${a.filename} ↔ ${b.filename}`, body => {
+    const summary = document.createElement('div');
+    summary.style.cssText = 'font-family:JetBrains Mono,monospace;font-size:11px;margin-bottom:10px;color:var(--text2);';
+    summary.innerHTML = `File A: <b>${a.count}</b> chunks &nbsp; File B: <b>${b.count}</b> chunks`;
+    body.appendChild(summary);
+
+    const diffs = [];
+
+    // Compare by chunk type+index
+    const maxLen = Math.max(a.chunks.length, b.chunks.length);
+    for (let i = 0; i < maxLen; i++) {
+      const ca = a.chunks[i], cb = b.chunks[i];
+      if (!ca && cb) { diffs.push({ type:'added',   label:`Chunk #${i} ${cb.typeName}`, sub:`Only in ${b.filename}` }); continue; }
+      if (ca && !cb) { diffs.push({ type:'removed', label:`Chunk #${i} ${ca.typeName}`, sub:`Only in ${a.filename}` }); continue; }
+      if (!ca || !cb) continue;
+      if (ca.type !== cb.type) {
+        diffs.push({ type:'changed', label:`Chunk #${i} type changed`, sub:`${ca.typeName} → ${cb.typeName}`, chunkIdx: i }); continue;
+      }
+      // Compare fields
+      const fa = JSON.stringify(ca.fields), fb = JSON.stringify(cb.fields);
+      if (fa !== fb) {
+        diffs.push({ type:'changed', label:`${ca.typeName} #${i} fields differ`, sub: diffSummary(ca.fields, cb.fields), chunkIdx: i });
+      }
+    }
+
+    if (!diffs.length) {
+      const ok = document.createElement('div'); ok.className = 'val-ok';
+      ok.textContent = '✅ Files are identical'; body.appendChild(ok); return;
+    }
+
+    const dsummary = document.createElement('div');
+    dsummary.style.cssText = 'font-size:12px;margin-bottom:8px;';
+    const added   = diffs.filter(d=>d.type==='added').length;
+    const removed = diffs.filter(d=>d.type==='removed').length;
+    const changed = diffs.filter(d=>d.type==='changed').length;
+    dsummary.innerHTML = `<span style="color:var(--accent3)">+${added} added</span>  <span style="color:var(--error)">-${removed} removed</span>  <span style="color:var(--warn)">~${changed} changed</span>`;
+    body.appendChild(dsummary);
+
+    diffs.forEach(d => {
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:6px 8px;border-radius:4px;margin-bottom:3px;font-family:JetBrains Mono,monospace;font-size:11px;cursor:pointer;';
+      row.classList.add(d.type === 'added' ? 'diff-added' : d.type === 'removed' ? 'diff-removed' : 'diff-changed');
+      const sym = d.type === 'added' ? '+' : d.type === 'removed' ? '-' : '~';
+      row.innerHTML = `<b style="color:${d.type==='added'?'var(--accent3)':d.type==='removed'?'var(--error)':'var(--warn)'}">${sym} ${d.label}</b><br><span style="color:var(--text3)">${d.sub||''}</span>`;
+      if (d.chunkIdx !== undefined) {
+        row.onclick = () => { state.selIdx = d.chunkIdx; treeExpanded.add(d.chunkIdx); renderTree(); renderProps(); };
+      }
+      body.appendChild(row);
+    });
+  });
+}
+
+function diffSummary(fa, fb) {
+  if (!fa || !fb) return 'fields differ';
+  const changed = [];
+  for (const key of new Set([...Object.keys(fa||{}), ...Object.keys(fb||{})])) {
+    if (JSON.stringify(fa?.[key]) !== JSON.stringify(fb?.[key])) changed.push(key);
+  }
+  return changed.slice(0,4).join(', ') + (changed.length > 4 ? '…' : '');
+}
+
+document.getElementById('btnCompare').addEventListener('click', openCompare);
+
+// ═══════════════════════════════════════════════════════
+// SelectOnParameter FULL EDITOR
+// ═══════════════════════════════════════════════════════
+// Override the generic renderer for SelectOnParameter
+const _origRenderProps = renderProps;
+// (already handled in renderProps dispatch — see below patch)
+
 
 // Init
 setupDropZone();
