@@ -1429,14 +1429,9 @@ function serializeChunkBody(chunk) {
   }
 
   const arr = w.toUint8Array();
-  if (chunk.isNew) {
-    chunk.rawData = arr; // bootstrap rawData for new chunks
-    return arr;
-  }
-  if (arr.length !== chunk.rawData.length) {
-    console.error(`[Jazz] ⚠ Chunk #${chunk.index} (${chunk.typeName}) size mismatch: wrote ${arr.length}, expected ${chunk.rawData.length} — using rawData instead!`);
-    return chunk.rawData;
-  }
+  // Always trust the re-serialized result for modified chunks.
+  // Size CAN legitimately change when nodes are added/deleted — never fall back to stale rawData.
+  chunk.rawData = arr; // keep rawData in sync for future reference
   return arr;
 }
 
@@ -1472,32 +1467,27 @@ function getChunkChildren(chunk) {
   if (!chunk || !chunk.fields) return [];
   const f = chunk.fields;
 
-  if (chunk.type === 0x02d5df13) // StateMachine
+  if (chunk.type === 0x02d5df13) // StateMachine → actors, params, states
     return [...(f.actorDefs||[]), ...(f.paramDefs||[]), ...(f.states||[])].filter(i => i !== null);
 
-  if (chunk.type === 0x02eedafe) { // State
-    const kids = [];
-    if (f.dgIndex !== null) kids.push(f.dgIndex);
-    (f.transitions||[]).forEach(i => { if (i !== null) kids.push(i); });
-    return kids;
+  if (chunk.type === 0x02eedafe) { // State → DG only (transitions are links, not tree children)
+    if (f.dgIndex !== null && f.dgIndex !== undefined) return [f.dgIndex];
+    return [];
   }
 
-  if (chunk.type === 0x02eedb18) // DecisionGraph
+  if (chunk.type === 0x02eedb18) // DecisionGraph → all nodes
     return (f.allNodes||[]).filter(i => i !== null);
 
-  // Action nodes with child actions
-  if (f.actions) return f.actions.filter(i => i !== null);
-
-  // Random: collect actions from all choices
+  // Random: choices' actions
   if (chunk.type === 0x02eedb70) {
     const kids = [];
-    (f.choices||[]).forEach(c => c.actions.forEach(i => { if (i !== null) kids.push(i); }));
+    (f.choices||[]).forEach(c => (c.actions||[]).forEach(i => { if (i !== null) kids.push(i); }));
     return kids;
   }
 
-  // NextState → shows target state
-  if (chunk.type === 0x02eeebdc)
-    return f.stateIdx !== null ? [f.stateIdx] : [];
+  // NextState → do NOT recurse into target state (would cause duplicates in tree)
+  // Prop / ActorOp / other action nodes with child actions
+  if (f.actions) return (f.actions||[]).filter(i => i !== null);
 
   return [];
 }
