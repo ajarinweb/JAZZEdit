@@ -520,6 +520,53 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+/* ─── NAME DISPLAY ───────────────────────────────────────────── */
+.name-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent3);
+  opacity: 0.85;
+  margin-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  display: inline-block;
+  vertical-align: middle;
+}
+.name-tag::before { content: '≡ '; opacity: 0.5; }
+
+.prop-with-name {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: nowrap;
+  flex: 1;
+}
+.prop-with-name .prop-input { flex: 0 0 auto; width: 200px; }
+.prop-with-name .name-tag { flex: 1; }
+
+/* name map side panel */
+.nm-entry {
+  display: grid;
+  grid-template-columns: 110px 1fr 20px;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.nm-entry .nm-hash { color: var(--warn); }
+.nm-entry .nm-name { color: var(--accent3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-entry .nm-del  { color: var(--text3); cursor: pointer; text-align: center; }
+.nm-entry .nm-del:hover { color: var(--error); }
+.nm-stats { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text3); margin-bottom: 8px; }
+
+/* tree name tag */
+.tree-name { color: var(--accent3); font-size: 10px; font-family: 'JetBrains Mono', monospace; opacity: 0.8; margin-left: 3px; }
+
+
 /* ─── SIDE PANEL (search / hash / compare / export) ──────────── */
 #side-panel {
   width: 340px; min-width: 240px;
@@ -799,6 +846,11 @@ body {
       <button class="tb-btn validate" id="btnValidate" title="Validate — check broken refs & orphans">✓ Validate</button>
       <button class="tb-btn search"   id="btnSearch"   title="Search by hash across all chunks">⌕ Search</button>
       <button class="tb-btn hash"     id="btnHash"     title="FNV Hash Calculator"># Hash</button>
+    </div>
+
+    <!-- Names group -->
+    <div class="tb-group">
+      <button class="tb-btn" id="btnNames" title="Load name map — show human-readable names for hashes">𝑁 Names <span id="nameCountBadge" style="display:none;font-size:9px;background:var(--accent2);color:#fff;border-radius:8px;padding:0 5px;margin-left:2px"></span></button>
     </div>
 
     <!-- Export/compare group -->
@@ -1515,12 +1567,35 @@ function getChunk(idx) {
 // ═══════════════════════════════════════════════════════
 function getChunkLabel(chunk) {
   if (!chunk) return '?';
-  if (chunk.type === 0x02d5df13 && chunk.fields)
-    return h8(chunk.fields.name);
-  if (chunk.type === 0x02eedafe && chunk.fields)
-    return h8(chunk.fields.stateName);
+  if (chunk.type === 0x02d5df13 && chunk.fields) {
+    const name = lookupName(chunk.fields.name);
+    return name ? `${name}` : h8(chunk.fields.name);
+  }
+  if (chunk.type === 0x02eedafe && chunk.fields) {
+    const name = lookupName(chunk.fields.stateName);
+    return name ? `${name}` : h8(chunk.fields.stateName);
+  }
   if (chunk.type === 0x02eedb18 && chunk.fields)
     return `(${chunk.fields.graphRoot.length} root)`;
+  if (chunk.type === 0x02eedb2f && chunk.fields) {
+    const name = lookupName(chunk.fields.parameterName);
+    return name ? name : h8(chunk.fields.parameterName);
+  }
+  if (chunk.type === 0x02eedb5f && chunk.fields) {
+    // Play: show clip name if known
+    const clipKey = h64(chunk.fields.clip?.instance?.lo||0, chunk.fields.clip?.instance?.hi||0);
+    const name = chunk.fields.strData || lookupName64(chunk.fields.clip?.instance?.lo||0, chunk.fields.clip?.instance?.hi||0);
+    return name ? name : 'Play';
+  }
+  if (chunk.type === 0x0344d438) return 'Stop';
+  if (chunk.type === 0x02eedb70) return 'Random';
+  if (chunk.type === 0x02eeebdc && chunk.fields) {
+    const ti = chunk.fields.stateIdx;
+    if (ti !== null && state.jazz?.chunks[ti]?.fields) {
+      const name = lookupName(state.jazz.chunks[ti].fields.stateName);
+      return name ? `→ ${name}` : `→ ${h8(state.jazz.chunks[ti].fields.stateName)}`;
+    }
+  }
   return `#${chunk.index}`;
 }
 
@@ -1582,7 +1657,11 @@ function buildTreeItem(chunkIdx, depth, expanded) {
 
   const lbl = document.createElement('span');
   lbl.className = `tree-label ${colorCls}`;
-  lbl.innerHTML = `<span class="tl-type">${chunk.typeName}</span> <span class="tl-name">${label}</span>`;
+  // If label is a name (not a hex hash), show hash as sub
+  const isHex = /^0x[0-9A-F]{8}$/i.test(label);
+  const hashSub = !isHex && chunk.type === 0x02eedafe && chunk.fields
+    ? ` <span class="tl-type" style="opacity:0.4">${h8(chunk.fields.stateName)}</span>` : '';
+  lbl.innerHTML = `<span class="tl-type">${chunk.typeName}</span> <span class="tl-name">${label}</span>${hashSub}`;
 
   row.appendChild(tog);
   row.appendChild(ico);
@@ -1800,9 +1879,8 @@ function renderStateMachineProps(panel, chunk) {
   }, 'used by AcquireStateMachine()');
   pb.appendChild(instRow.row);
 
-  const nameRow = propRow('Name Hash', h8(f.name), v => {
-    const n = parseHex(v);
-    if (n === null) return;
+  const nameRow = propRowWithName('Name Hash', f.name, v => {
+    const n = parseHex(v); if (n === null) return;
     f.name = n; chunk.modified = true; return true;
   }, 'uint32 hash');
   pb.appendChild(nameRow.row);
@@ -1849,8 +1927,9 @@ function renderStateMachineProps(panel, chunk) {
       .map(({ idx }) => {
         const sc = all[idx];
         const nameHash = sc.fields ? h8(sc.fields.stateName) : '?';
+        const stateName = sc.fields ? (lookupName(sc.fields.stateName) || nameHash) : nameHash;
         return {
-          icon: '📌', label: `State ${nameHash}`, sub: `#${idx}`,
+          icon: '📌', label: `State ${stateName}`, sub: `#${idx}`,
           onNav:    () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
           onDelete: () => {
             removeStateFromSM(chunk, idx);
@@ -1920,9 +1999,8 @@ function renderStateProps(panel, chunk) {
 
   const { section: ps, body: pb } = section('📌 State Properties', 'var(--state-color)');
 
-  const nameRow = propRow('State Name Hash', h8(f.stateName), v => {
-    const n = parseHex(v);
-    if (n === null) return;
+  const nameRow = propRowWithName('State Name Hash', f.stateName, v => {
+    const n = parseHex(v); if (n === null) return;
     f.stateName = n; chunk.modified = true;
     renderTree(); return true;
   }, 'uint32 hash');
@@ -2007,8 +2085,9 @@ function renderStateProps(panel, chunk) {
       .map(({ idx }) => {
         const tc = all[idx];
         const nameHash = tc?.fields ? h8(tc.fields.stateName) : '?';
+        const stateName = tc?.fields ? (lookupName(tc.fields.stateName) || nameHash) : nameHash;
         return {
-          icon: '➡', label: `State ${nameHash}`, sub: `#${idx}`,
+          icon: '➡', label: `State ${stateName}`, sub: `#${idx}`,
           onNav:    () => { state.selIdx = idx; treeExpanded.add(idx); renderTree(); renderProps(); },
           onDelete: () => {
             removeTransitionFromState(chunk, idx);
@@ -2138,7 +2217,7 @@ function renderActorDefProps(panel, chunk) {
   const f = chunk.fields;
   const { section: ps, body: pb } = section('🎪 Actor Definition', 'var(--actor-color)');
 
-  const nr = propRow('Parameter Name', h8(f.parameterName), v => {
+  const nr = propRowWithName('Parameter Name', f.parameterName, v => {
     const n = parseHex(v); if (n === null) return;
     f.parameterName = n; chunk.modified = true; return true;
   }, 'uint32 hash');
@@ -2158,7 +2237,7 @@ function renderParamDefProps(panel, chunk) {
   const f = chunk.fields;
   const { section: ps, body: pb } = section('⚙ Parameter Definition', 'var(--actor-color)');
 
-  const nr = propRow('Param Name', h8(f.paramName), v => {
+  const nr = propRowWithName('Param Name', f.paramName, v => {
     const n = parseHex(v); if (n === null) return;
     f.paramName = n; chunk.modified = true; return true;
   }, 'uint32 hash');
@@ -2241,9 +2320,19 @@ function renderPlayProps(panel, chunk) {
 
   const { section: ps, body: pb } = section('▶ Play Animation', 'var(--node-color)');
 
-  pb.appendChild(propRow('Clip Type',     h8(f.clip.type),  v => { const n=parseHex(v); if(n===null)return; f.clip.type=n; chunk.modified=true; return true; }).row);
-  pb.appendChild(propRow('Clip Group',    h8(f.clip.group), v => { const n=parseHex(v); if(n===null)return; f.clip.group=n; chunk.modified=true; return true; }).row);
-  pb.appendChild(propRow('Clip Instance', h64(f.clip.instance.lo, f.clip.instance.hi), null, '', true).row);
+  pb.appendChild(propRow('Clip Type',  h8(f.clip.type),  v => { const n=parseHex(v); if(n===null)return; f.clip.type=n; chunk.modified=true; return true; }).row);
+  pb.appendChild(propRow('Clip Group', h8(f.clip.group), v => { const n=parseHex(v); if(n===null)return; f.clip.group=n; chunk.modified=true; return true; }).row);
+  // Clip Instance — show name if known
+  {
+    const clipName = f.strData || lookupName64(f.clip.instance.lo, f.clip.instance.hi);
+    const clipRow = propRow('Clip Instance', h64(f.clip.instance.lo, f.clip.instance.hi), null, '', true);
+    if (clipName) {
+      const nt = nameTag(clipName);
+      nt.style.marginLeft = '8px';
+      clipRow.row.querySelector('.prop-value').appendChild(nt);
+    }
+    pb.appendChild(clipRow.row);
+  }
 
   pb.appendChild(propRow('TrackMask Type',     h8(f.tkMk.type),  v => { const n=parseHex(v); if(n===null)return; f.tkMk.type=n; chunk.modified=true; return true; }).row);
   pb.appendChild(propRow('TrackMask Instance', h64(f.tkMk.instance.lo, f.tkMk.instance.hi), null, '', true).row);
@@ -3353,7 +3442,9 @@ function loadFile(file) {
 
       renderTree();
       renderProps();
-      notify(`Loaded: ${file.name} — ${state.jazz.count} chunks`);
+      const extracted = extractNamesFromJazz();
+      if (extracted > 0) { updateNameCountBadge(); }
+      notify(`Loaded: ${file.name} — ${state.jazz.count} chunks${extracted ? ` · ${extracted} names extracted` : ''}`);
     } catch (err) {
       alert('Error: ' + err.message);
       console.error(err);
@@ -3610,6 +3701,9 @@ function openHashCalc() {
         return d;
       }
 
+      // Check if hash already known in map (reverse lookup)
+      const existing32 = lookupName(f32l) || lookupName(f32);
+      if (!existing32) { nameMap.set(f32l, s); updateNameCountBadge(); }
       results.appendChild(makeResult('FNV32 (exact case)', h8(f32)));
       results.appendChild(makeResult('FNV32 (lowercase)', h8(f32l)));
       results.appendChild(makeResult('FNV64 (exact case)', h64(f64.lo, f64.hi)));
@@ -4083,6 +4177,362 @@ document.getElementById('btnCompare').addEventListener('click', openCompare);
 const _origRenderProps = renderProps;
 // (already handled in renderProps dispatch — see below patch)
 
+
+
+// ═══════════════════════════════════════════════════════
+// NAME MAP — hash → human readable name
+// ═══════════════════════════════════════════════════════
+
+// Global name map: uint32 (as number) → string
+const nameMap = new Map();
+
+// ── Lookup helpers ────────────────────────────────────
+function lookupName(hash) {
+  if (!hash && hash !== 0) return null;
+  return nameMap.get(hash >>> 0) || null;
+}
+
+function lookupName64(lo, hi) {
+  // For 64-bit clip hashes, store as hex string key
+  const key = h64(lo, hi);
+  return nameMap.get(key) || null;
+}
+
+function setName(hash, name) {
+  nameMap.set(hash >>> 0, name);
+}
+
+function setName64(lo, hi, name) {
+  nameMap.set(h64(lo, hi), name);
+}
+
+function updateNameCountBadge() {
+  const badge = document.getElementById('nameCountBadge');
+  if (!badge) return;
+  if (nameMap.size > 0) {
+    badge.textContent = nameMap.size;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// ── Name display helpers ──────────────────────────────
+function nameTag(name) {
+  if (!name) return '';
+  const span = document.createElement('span');
+  span.className = 'name-tag';
+  span.textContent = name;
+  span.title = name;
+  return span;
+}
+
+// Wrap a propRow input to show name alongside hash
+function propRowWithName(label, hash, onChange, hint) {
+  const { row, input } = propRow(label, h8(hash), onChange, hint);
+  const name = lookupName(hash);
+  if (name) {
+    // insert name tag after input
+    const wrap = document.createElement('div');
+    wrap.className = 'prop-with-name';
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    wrap.appendChild(nameTag(name));
+  }
+  return { row, input };
+}
+
+// ── Parse name map file ───────────────────────────────
+// Supports multiple formats:
+//   0x{hash8}	{name}        SmoothJazz/s3pe style
+//   {hash8}	{name}          no 0x prefix
+//   {hash8},{name}           CSV
+//   {name}:{hash8}           reversed
+//   {name}                   just names (compute FNV32 lower)
+//   // or # comment lines are skipped
+function parseNameMapText(text) {
+  let added = 0, skipped = 0;
+  const lines = text.split(/\r?\n/);
+  for (let line of lines) {
+    line = line.trim();
+    if (!line || line.startsWith('//') || line.startsWith('#')) continue;
+
+    // Try: 0x{hex8} {name}  or  {hex8} {name}  or  {hex8},{name}  or  {hex8}	{name}
+    let m = line.match(/^0?x?([0-9a-f]{8})[,	 ]+(.+)$/i);
+    if (m) {
+      const hash = parseInt(m[1], 16) >>> 0;
+      const name = m[2].trim();
+      if (name) { nameMap.set(hash, name); added++; continue; }
+    }
+
+    // Try: {name}:{hex8}  or  {name},{hex8}
+    m = line.match(/^(.+?)[,:	 ]+0?x?([0-9a-f]{8})$/i);
+    if (m) {
+      const name = m[1].trim();
+      const hash = parseInt(m[2], 16) >>> 0;
+      if (name) { nameMap.set(hash, name); added++; continue; }
+    }
+
+    // Try: just a name string (compute FNV32 lowercase)
+    if (/^[a-z0-9_]+$/i.test(line) && line.length > 2) {
+      const hash = fnv32Lower(line);
+      nameMap.set(hash, line); added++; continue;
+    }
+
+    // Try 64-bit: {hex16}	{name}
+    m = line.match(/^0?x?([0-9a-f]{16})[,	 ]+(.+)$/i);
+    if (m) {
+      const key = '0x' + m[1].toUpperCase();
+      const name = m[2].trim();
+      if (name) { nameMap.set(key, name); added++; continue; }
+    }
+
+    skipped++;
+  }
+  return { added, skipped };
+}
+
+// ── Extract names from the loaded JAZZ file itself ────
+function extractNamesFromJazz() {
+  if (!state.jazz) return 0;
+  let found = 0;
+  // Play nodes: if strData is set, that's the substitution name
+  state.jazz.chunks.forEach(c => {
+    if (!c.fields) return;
+    if (c.type === 0x02eedb5f && c.fields.strData) {
+      // strData is like "a2o_bakersStation_stir_loop_x"
+      // Compute its FNV32 and store
+      const name = c.fields.strData;
+      const h32  = fnv32Lower(name);
+      if (!nameMap.has(h32)) { nameMap.set(h32, name); found++; }
+      // Also store the 64-bit clip hash → name mapping
+      if (c.fields.clip) {
+        const key = h64(c.fields.clip.instance.lo, c.fields.clip.instance.hi);
+        if (!nameMap.has(key)) { nameMap.set(key, name); found++; }
+      }
+    }
+  });
+  return found;
+}
+
+// ── Names side panel ──────────────────────────────────
+function openNamesPanel() {
+  openSidePanel('𝑁 Name Map', body => {
+
+    // Upload section
+    const uploadSection = document.createElement('div');
+    uploadSection.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+    const uploadTitle = document.createElement('div');
+    uploadTitle.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;';
+    uploadTitle.textContent = 'Load Name Map File';
+    uploadSection.appendChild(uploadTitle);
+
+    const uploadHint = document.createElement('div');
+    uploadHint.className = 'form-hint';
+    uploadHint.innerHTML = 'Accepts: <b>.txt</b> / <b>.csv</b> with lines like:<br><code style="color:var(--warn)">0x1234ABCD&nbsp;&nbsp;my_animation_name</code><br>or just a list of animation names (one per line)';
+    uploadSection.appendChild(uploadHint);
+
+    const uploadRow = document.createElement('div');
+    uploadRow.style.cssText = 'display:flex;gap:6px;';
+
+    const fileLabel = document.createElement('label');
+    fileLabel.className = 'btn btn-action btn-add';
+    fileLabel.style.cssText = 'padding:4px 10px;font-size:11px;cursor:pointer;';
+    fileLabel.textContent = '📂 Load file';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file'; fileInput.accept = '.txt,.csv,.map';
+    fileInput.style.display = 'none';
+    fileLabel.appendChild(fileInput);
+    uploadRow.appendChild(fileLabel);
+
+    const btnExtract = document.createElement('button');
+    btnExtract.className = 'btn-action btn-add btn';
+    btnExtract.style.cssText = 'padding:4px 10px;font-size:11px;';
+    btnExtract.textContent = '⟳ Extract from JAZZ';
+    btnExtract.title = 'Auto-extract names from substitution strings in Play nodes';
+    btnExtract.onclick = () => {
+      const n = extractNamesFromJazz();
+      notify(`Extracted ${n} names from JAZZ file`);
+      updateNameCountBadge();
+      refreshList();
+      renderTree(); renderProps();
+    };
+    uploadRow.appendChild(btnExtract);
+    uploadSection.appendChild(uploadRow);
+
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const { added, skipped } = parseNameMapText(ev.target.result);
+        notify(`Loaded ${added} names (${skipped} skipped)`);
+        updateNameCountBadge();
+        refreshList();
+        renderTree(); renderProps();
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    });
+
+    body.appendChild(uploadSection);
+
+    // Manual add
+    const addTitle = document.createElement('div');
+    addTitle.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-top:4px;';
+    addTitle.textContent = 'Add Name Manually';
+    body.appendChild(addTitle);
+
+    const addRow = document.createElement('div');
+    addRow.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+
+    const nameInp = document.createElement('input');
+    nameInp.className = 'form-input';
+    nameInp.placeholder = 'e.g. a2o_bakersStation_stir_loop_x';
+    nameInp.style.flex = '1'; nameInp.style.minWidth = '0';
+    addRow.appendChild(nameInp);
+
+    const hashPreview = document.createElement('span');
+    hashPreview.style.cssText = 'font-family:JetBrains Mono,monospace;font-size:10px;color:var(--warn);flex-shrink:0;';
+    hashPreview.textContent = '0x????????';
+    addRow.appendChild(hashPreview);
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn-action btn-add btn';
+    addBtn.style.cssText = 'padding:4px 10px;font-size:11px;flex-shrink:0;';
+    addBtn.textContent = '+ Add';
+    addRow.appendChild(addBtn);
+
+    nameInp.addEventListener('input', () => {
+      const s = nameInp.value.trim();
+      if (s) {
+        const h = fnv32Lower(s);
+        hashPreview.textContent = h8(h);
+      } else {
+        hashPreview.textContent = '0x????????';
+      }
+    });
+
+    addBtn.addEventListener('click', () => {
+      const s = nameInp.value.trim();
+      if (!s) return;
+      const h = fnv32Lower(s);
+      nameMap.set(h, s);
+      nameInp.value = '';
+      hashPreview.textContent = '0x????????';
+      notify(`Added: ${h8(h)} → ${s}`);
+      updateNameCountBadge();
+      refreshList();
+      renderTree(); renderProps();
+    });
+
+    nameInp.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn.click(); });
+    body.appendChild(addRow);
+
+    // Export / clear buttons
+    const ctrlRow = document.createElement('div');
+    ctrlRow.style.cssText = 'display:flex;gap:6px;margin-top:2px;';
+
+    const btnExportMap = document.createElement('button');
+    btnExportMap.className = 'btn btn-open';
+    btnExportMap.style.cssText = 'padding:4px 10px;font-size:11px;';
+    btnExportMap.textContent = '⬇ Export map';
+    btnExportMap.onclick = () => {
+      let txt = '';
+      nameMap.forEach((name, key) => {
+        if (typeof key === 'number')
+          txt += `${h8(key)}	${name}
+`;
+        else
+          txt += `${key}	${name}
+`; // 64-bit
+      });
+      const blob = new Blob([txt], {type:'text/plain'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'names.txt'; a.click();
+    };
+    ctrlRow.appendChild(btnExportMap);
+
+    const btnClear = document.createElement('button');
+    btnClear.className = 'btn-action btn-delete btn';
+    btnClear.style.cssText = 'padding:4px 10px;font-size:11px;';
+    btnClear.textContent = '✕ Clear all';
+    btnClear.onclick = () => {
+      nameMap.clear();
+      updateNameCountBadge();
+      refreshList();
+      renderTree(); renderProps();
+      notify('Name map cleared');
+    };
+    ctrlRow.appendChild(btnClear);
+    body.appendChild(ctrlRow);
+
+    // Stats + list
+    const stats = document.createElement('div');
+    stats.className = 'nm-stats';
+    body.appendChild(stats);
+
+    const listTitle = document.createElement('div');
+    listTitle.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-top:4px;';
+    listTitle.textContent = 'Loaded Names';
+    body.appendChild(listTitle);
+
+    const searchInp = document.createElement('input');
+    searchInp.className = 'form-input';
+    searchInp.placeholder = '🔍 Filter names...';
+    body.appendChild(searchInp);
+
+    const listDiv = document.createElement('div');
+    listDiv.style.cssText = 'display:flex;flex-direction:column;max-height:40vh;overflow-y:auto;';
+    body.appendChild(listDiv);
+
+    function refreshList() {
+      const q = searchInp.value.trim().toLowerCase();
+      stats.textContent = `${nameMap.size} names loaded`;
+      listDiv.innerHTML = '';
+      if (!nameMap.size) {
+        const empty = document.createElement('div');
+        empty.className = 'no-items'; empty.textContent = 'No names loaded yet';
+        listDiv.appendChild(empty);
+        return;
+      }
+      let count = 0;
+      nameMap.forEach((name, key) => {
+        const hashStr = typeof key === 'number' ? h8(key) : key;
+        if (q && !name.toLowerCase().includes(q) && !hashStr.toLowerCase().includes(q)) return;
+        if (count++ > 200) return; // limit display
+        const row = document.createElement('div');
+        row.className = 'nm-entry';
+        const hSpan = document.createElement('span');
+        hSpan.className = 'nm-hash'; hSpan.textContent = hashStr;
+        const nSpan = document.createElement('span');
+        nSpan.className = 'nm-name'; nSpan.textContent = name; nSpan.title = name;
+        const del = document.createElement('span');
+        del.className = 'nm-del'; del.textContent = '✕';
+        del.onclick = () => {
+          nameMap.delete(key);
+          updateNameCountBadge();
+          refreshList();
+          renderTree(); renderProps();
+        };
+        row.appendChild(hSpan); row.appendChild(nSpan); row.appendChild(del);
+        listDiv.appendChild(row);
+      });
+      if (count > 200) {
+        const more = document.createElement('div');
+        more.className = 'nm-stats'; more.textContent = `... and ${nameMap.size - 200} more. Use filter to narrow down.`;
+        listDiv.appendChild(more);
+      }
+    }
+
+    searchInp.addEventListener('input', refreshList);
+    refreshList();
+  });
+}
+
+document.getElementById('btnNames').addEventListener('click', openNamesPanel);
 
 // Init
 setupDropZone();
