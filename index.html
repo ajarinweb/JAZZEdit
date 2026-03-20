@@ -974,22 +974,27 @@ class BinReader {
 }
 
 class BinWriter {
-  constructor() { this.buf = []; }
+  constructor() { this.buf = []; this._f32arr = new Float32Array(1); this._f32view = new DataView(this._f32arr.buffer); }
   u8(v)  { this.buf.push(v & 0xFF); }
   u32(v) { v = v >>> 0; this.buf.push(v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF); }
   i32(v) { this.u32(v >>> 0); }
   u64(lo, hi) { this.u32(lo); this.u32(hi); }
+  f32(v) { this._f32arr[0] = v; this.u32(this._f32view.getUint32(0, true)); }
   fourcc(s) { for (let i = 0; i < 4; i++) this.buf.push((s.charCodeAt(i) || 0) & 0xFF); }
   str(s) {
-    if (!s) { this.u32(0); return; }
+    if (!s || s.length === 0) { this.u32(0); return; }
     this.u32(s.length);
     for (let i = 0; i < s.length; i++) {
       const c = s.charCodeAt(i);
       this.buf.push(c & 0xFF, (c >> 8) & 0xFF);
     }
-    const byteLen = s.length * 2;
-    const pad = ((byteLen + 4) & ~3) - byteLen;
-    for (let i = 0; i < pad; i++) this.buf.push(0);
+    // Pad to 4-byte boundary after the string bytes
+    // JazzWriter: odd length → pad 2 bytes (uint16), even → pad 4 bytes (uint32)
+    if (s.length & 1) {
+      this.buf.push(0, 0); // 2 bytes padding (odd length)
+    } else {
+      this.buf.push(0, 0, 0, 0); // 4 bytes padding (even length)
+    }
   }
   bytes(arr) { for (const b of arr) this.buf.push(b); }
   length() { return this.buf.length; }
@@ -1204,6 +1209,7 @@ function parseChunkFields(info, all, buffer) {
       f.sentinel3 = r.u32();
       const ac2 = r.i32();
       f.actions   = Array.from({length: ac2}, () => decodeIdx(r.u32()));
+      f.dgnTag    = r.fourcc(); // "/DGN" — ActionBase suffix
 
     } else if (info.type === 0x0344d438) {   // ─ Stop (LoadSaveAnimChunk is empty)
       const f = info.fields = {};
@@ -1218,6 +1224,7 @@ function parseChunkFields(info, all, buffer) {
       f.sentinel  = r.u32();
       const ac3 = r.i32();
       f.actions   = Array.from({length: ac3}, () => decodeIdx(r.u32()));
+      f.dgnTag    = r.fourcc(); // "/DGN" — ActionBase suffix
 
     } else if (info.type === 0x02eedb70) {   // ─ Random (Rand)
       const f = info.fields = {};
@@ -1230,6 +1237,7 @@ function parseChunkFields(info, all, buffer) {
       });
       f.sentinel = r.u32();
       f.flags    = r.u32();
+      f.dgnTag   = r.fourcc(); // "/DGN" — ActionBase suffix
 
     } else if (info.type === 0x02eeebdd) {   // ─ Prop
       const f = info.fields = {};
@@ -1239,37 +1247,59 @@ function parseChunkFields(info, all, buffer) {
       f.propUnk2  = Array.from({length: 4}, () => r.u32());
       const pac = r.i32();
       f.actions   = Array.from({length: pac}, () => decodeIdx(r.u32()));
+      f.dgnTag    = r.fourcc(); // "/DGN" — ActionBase suffix
 
-    } else if (info.type === 0x02eeebdc) {   // ─ NextState
+    } else if (info.type === 0x02eeebdc) {   // ─ NextState (SNSN)
+      // ActionBase: LoadSaveDGNChunk → io.FourCC("/DGN")
       const f = info.fields = {};
       f.stateIdx = decodeIdx(r.u32());
+      f.dgnTag = r.fourcc(); // "/DGN"
 
-    } else if (info.type === 0x02eeebde) {   // ─ ActorOperation
+    } else if (info.type === 0x02eeebde) {   // ─ ActorOperation (AcOp)
+      // ActorOperation.cs:
+      //   RCOLIndex<ActorDefinition>(ref mActor)   → single ref
+      //   UInt32(mOperations)                       → count + list
+      //   UnknownData(3)                            → 3 uint32
+      //   RCOLIndex<ActionBase>(mLinkedAction)      → count + list
+      // ActionBase: → io.FourCC("/DGN")
       const f = info.fields = {};
-      f.actorIdx  = decodeIdx(r.u32());
-      f.operation = r.u32();
-      f.actorIdx2 = decodeIdx(r.u32());
-      const nc = r.i32();
-      f.actions   = Array.from({length: nc}, () => decodeIdx(r.u32()));
+      f.actorIdx   = decodeIdx(r.u32());
+      const opCount = r.i32();
+      f.operations = Array.from({length: opCount}, () => r.u32());
+      f.unknowns   = Array.from({length: 3}, () => r.u32());
+      const nc     = r.i32();
+      f.actions    = Array.from({length: nc}, () => decodeIdx(r.u32()));
+      f.dgnTag     = r.fourcc(); // "/DGN"
 
-    } else if (info.type === 0x02eedb46) {   // ─ ParameterDefinition
+    } else if (info.type === 0x02eedb46) {   // ─ ParameterDefinition (S_PD)
+      // NOT an ActionBase — no /DGN
       const f = info.fields = {};
-      f.paramName = r.u32();
+      f.paramName    = r.u32();
       f.defaultValue = r.u32();
-      // possibly more fields
 
-    } else if (info.type === 0x02eedb92) {   // ─ SelectOnParameter
+    } else if (info.type === 0x02eedb92) {   // ─ SelectOnParameter (SoPn)
+      // SelectOnParameter.cs:
+      //   RCOLIndex<ParameterDefinition>(ref mParameter)
+      //   Substruct<SelectValues>(mValues, ...) → count + {Value(u32), Actions[RCOLIndex]}
+      //   Sentinel()
+      // ActionBase: → io.FourCC("/DGN")
       const f = info.fields = {};
       f.paramIdx = decodeIdx(r.u32());
       const nc = r.i32();
       f.cases = Array.from({length: nc}, () => {
-        const value = r.u32();
-        const nc2 = r.i32();
+        const value   = r.u32();
+        const nc2     = r.i32();
         const actions = Array.from({length: nc2}, () => decodeIdx(r.u32()));
         return { value, actions };
       });
-      f.sentinel = r.u32();
+      f.sentinel = r.u32();   // 0xDEADBEEF
+      f.dgnTag   = r.fourcc(); // "/DGN"
     }
+
+    // Read /DGN suffix for all ActionBase types
+    // (Play, Stop, Random, Prop already read theirs inline above —
+    //  add it here for the ones that don't)
+
   } catch(e) {
     // partial parse is fine, we'll show what we got
   }
@@ -1279,40 +1309,44 @@ function parseChunkFields(info, all, buffer) {
 // JAZZ WRITER
 // ═══════════════════════════════════════════════════════
 function writeJazz(jazzData, targetVersion) {
-  const { chunks, count } = jazzData;
-  const ver = targetVersion || jazzData.version;
+  const chunks = jazzData.chunks;
+  const n      = chunks.length;          // single source of truth — never use jazzData.count
+  const ver    = targetVersion || jazzData.version;
 
-  // Serialize each chunk body
+  // Serialize each chunk body FIRST so we know exact sizes
   const bodies = chunks.map(c => serializeChunkBody(c));
 
-  // Calculate absolute offsets
-  const headerBytes = 20 + count * 16 + count * 8;
+  // Absolute offset of first chunk body:
+  // 20 (file header) + n*16 (ID table) + n*8 (location table)
+  const headerBytes = 20 + n * 16 + n * 8;
   const offsets = [];
   let pos = headerBytes;
   for (const b of bodies) { offsets.push(pos); pos += b.length; }
 
   const w = new BinWriter();
 
-  // File header
-  w.u32(ver);
-  w.u32(1);
-  w.u64(0, 0); // field2 = 0
-  w.u32(count);
+  // ── File header (20 bytes) ──
+  w.u32(ver);   // version
+  w.u32(1);     // always 1
+  w.u32(0);     // field2 lo  (two separate uint32, NOT u64 — matches JazzWriter.cs bw.Write(0) x2)
+  w.u32(0);     // field2 hi
+  w.u32(n);     // chunk count
 
-  // Chunk ID table
+  // ── Chunk ID table (n * 16 bytes) ──
   for (const c of chunks) {
-    w.u64(c.instance.lo, c.instance.hi);
+    w.u32(c.instance.lo);  // instance low  (written as two u32, matches C# UInt64 layout)
+    w.u32(c.instance.hi);  // instance high
     w.u32(c.type);
     w.u32(c.group);
   }
 
-  // Chunk location table
-  for (let i = 0; i < count; i++) {
-    w.i32(offsets[i]);
-    w.i32(bodies[i].length);
+  // ── Chunk location table (n * 8 bytes) ──
+  for (let i = 0; i < n; i++) {
+    w.i32(offsets[i]);        // absolute offset into file
+    w.i32(bodies[i].length);  // byte size of chunk body
   }
 
-  // Chunk bodies
+  // ── Chunk bodies ──
   for (const b of bodies) w.bytes(b);
 
   return w.toUint8Array();
@@ -1324,8 +1358,10 @@ function writeResKey(w, k) {
 }
 
 function serializeChunkBody(chunk) {
-  // Only re-serialize if explicitly modified — otherwise return rawData byte-for-byte
-  if (!chunk.fields || !chunk.modified) return chunk.rawData;
+  // Unmodified chunks: return original bytes exactly
+  if (!chunk.modified) return chunk.rawData;
+  // Unknown chunk type: no serializer, return original
+  if (!chunk.fields) return chunk.rawData;
 
   const w = new BinWriter();
   w.fourcc(chunk.fourcc);
@@ -1375,33 +1411,36 @@ function serializeChunkBody(chunk) {
     w.u32(0xDEADBEEF);
     w.u32(f.flags); w.i32(f.priority);
     f.animUnk1.forEach(u => w.u32(u));
-    w.u32(Math.fround(f.blendIn) === f.blendIn ? new DataView(new Float32Array([f.blendIn]).buffer).getUint32(0, true) : 0);
+    w.f32(f.blendIn);
     f.animUnk2.forEach(u => w.u32(u));
     w.u32(encodeIdx(f.actorIdx)); w.i32(f.priority2);
     f.animUnk3.forEach(u => w.u32(u));
     w.u32(0xDEADBEEF);
     w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x0344d438) {
     const f = chunk.fields;
     w.u32(f.flags); w.i32(f.priority);
     f.animUnk1.forEach(u => w.u32(u));
-    w.u32(new DataView(new Float32Array([f.blendIn]).buffer).getUint32(0, true));
+    w.f32(f.blendIn);
     f.animUnk2.forEach(u => w.u32(u));
     w.u32(encodeIdx(f.actorIdx)); w.i32(f.priority2);
     f.animUnk3.forEach(u => w.u32(u));
     w.u32(0xDEADBEEF);
     w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x02eedb70) {
     const f = chunk.fields;
     w.i32(f.choices.length);
     f.choices.forEach(c => {
-      w.u32(new DataView(new Float32Array([c.weight]).buffer).getUint32(0, true));
+      w.f32(c.weight);
       w.i32(c.actions.length); c.actions.forEach(i => w.u32(encodeIdx(i)));
     });
     w.u32(0xDEADBEEF);
     w.u32(f.flags);
+    w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x02eeebdd) {
     const f = chunk.fields;
@@ -1410,19 +1449,41 @@ function serializeChunkBody(chunk) {
     writeResKey(w, f.catalogRef);
     f.propUnk2.forEach(u => w.u32(u));
     w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x02eeebdc) {
     const f = chunk.fields;
     w.u32(encodeIdx(f.stateIdx));
+    w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x02eeebde) {
+    // ActorOperation.cs: actorRef + operations(list) + unknowns[3] + actions(list) + /DGN
     const f = chunk.fields;
-    w.u32(encodeIdx(f.actorIdx)); w.u32(f.operation); w.u32(encodeIdx(f.actorIdx2));
-    w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    w.u32(encodeIdx(f.actorIdx));
+    w.i32((f.operations||[]).length);
+    (f.operations||[]).forEach(op => w.u32(op));
+    (f.unknowns||[0,0,0]).forEach(u => w.u32(u));
+    w.i32((f.actions||[]).length);
+    (f.actions||[]).forEach(i => w.u32(encodeIdx(i)));
+    w.fourcc('/DGN'); // ActionBase suffix
+
+  } else if (chunk.type === 0x02eedb92) {
+    // SelectOnParameter.cs: paramRef + substruct(values) + sentinel + /DGN
+    const f = chunk.fields;
+    w.u32(encodeIdx(f.paramIdx));
+    w.i32((f.cases||[]).length);
+    (f.cases||[]).forEach(c => {
+      w.u32(c.value);
+      w.i32((c.actions||[]).length);
+      (c.actions||[]).forEach(i => w.u32(encodeIdx(i)));
+    });
+    w.u32(0xDEADBEEF);   // sentinel
+    w.fourcc('/DGN');     // ActionBase suffix
 
   } else if (chunk.type === 0x02eedb46) {
     const f = chunk.fields;
     w.u32(f.paramName); w.u32(f.defaultValue);
+    // ParameterDefinition is NOT an ActionBase — no /DGN
 
   } else {
     return chunk.rawData;
