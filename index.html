@@ -3768,38 +3768,30 @@ function fnv32Lower(str) { return fnv32(str.toLowerCase()); }
 // FNV-1 64-bit — S3PE initial: 0xcbf29ce484222325, prime: 0x00000100000001B3
 // Stored as {lo, hi} (little-endian: lo = low 32 bits)
 function fnv64(str) {
-  // Initial basis: 0xcbf29ce484222325
-  //   hi = 0xcbf29ce4, lo = 0x84222325
+  // FNV-1 64-bit — S3PE/Sims3 compatible
+  // Initial basis: 0xcbf29ce484222325, prime: 0x00000100000001B3
   let lo = 0x84222325 >>> 0;
   let hi = 0xcbf29ce4 >>> 0;
 
   for (let i = 0; i < str.length; i++) {
     const c = str.charCodeAt(i) & 0xFF;
 
-    // Multiply by 0x00000100000001B3 (FNV prime 64-bit)
-    // Split into 32-bit ops:
-    //   newlo = lo * 0x01000193 + lo * 0x0000_0000 (low part)
-    //   We compute (hi:lo) * prime using schoolbook multiplication
-    //
-    //   prime = 0x00000100_000001B3
-    //   lo_prime = 0x000001B3
-    //   hi_prime = 0x00000100
-    const lo_prime = 0x000001B3 >>> 0;
-    const hi_prime = 0x00000100 >>> 0;
+    // Multiply (hi:lo) by prime 0x00000100_000001B3
+    // lo must be treated as UNSIGNED for the carry calculation.
+    // Using (lo >>> 0) ensures the float product is positive.
+    const lo_u = lo >>> 0;  // guarantee unsigned for float math
+    const lo_prime = 0x000001B3;
+    const hi_prime = 0x00000100;
 
-    const new_lo = Math.imul(lo, lo_prime) >>> 0;
-    const new_hi = (
-      Math.imul(hi, lo_prime) +
-      Math.imul(lo, hi_prime) +
-      // carry from lo*lo_prime into upper 32 bits
-      Math.floor((lo * lo_prime) / 0x100000000)
-    ) >>> 0;
+    const new_lo = Math.imul(lo_u, lo_prime) >>> 0;
+    const carry  = Math.floor(lo_u * lo_prime / 0x100000000); // always non-negative
+    const new_hi = (Math.imul(hi, lo_prime) + Math.imul(lo_u, hi_prime) + carry) >>> 0;
 
     lo = new_lo;
     hi = new_hi;
 
-    // XOR with byte (FNV-1: multiply then XOR)
-    lo ^= c;
+    // FNV-1: multiply then XOR; keep lo UNSIGNED with >>> 0
+    lo = (lo ^ c) >>> 0;
   }
   return { lo: lo >>> 0, hi: hi >>> 0 };
 }
