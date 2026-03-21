@@ -416,7 +416,10 @@ body {
 }
 
 .prop-input {
-  flex: 1;
+  /* flex:1 handled by parent wrap — use width:100% inside column flex */
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -432,6 +435,9 @@ body {
 }
 .prop-input.readonly { color: var(--text3); cursor: default; }
 .prop-input.modified { border-color: var(--warn); color: var(--warn); }
+
+/* When prop-input is a direct child of prop-value (no wrap) keep flex:1 */
+.prop-value > .prop-input { flex: 1; width: auto; }
 
 .prop-hint {
   font-size: 10px;
@@ -1798,6 +1804,9 @@ function propRow(label, value, onChange, hint, readOnly) {
   wrap.appendChild(sub);
 
   // Show subtitle for hash-shaped values (0x + 8 or 16 hex chars)
+  // Track pending reverse lookups so we don't spam
+  let _subReverseTimer = null;
+
   function updateSub(v) {
     v = v.trim();
     let name = null;
@@ -1805,13 +1814,41 @@ function propRow(label, value, onChange, hint, readOnly) {
     const m64 = v.match(/^0?[xX]?([0-9A-Fa-f]{16})$/);
     if (m32) name = lookupName(parseInt(m32[1], 16));
     else if (m64) {
-      const hi = parseInt(m64[1].slice(0,8), 16);
-      const lo = parseInt(m64[1].slice(8,16), 16);
+      const hi = parseInt(m64[1].slice(0, 8), 16);
+      const lo = parseInt(m64[1].slice(8, 16), 16);
       name = lookupName64(lo, hi);
     }
+
     if (name) {
       sub.textContent = name;
+      sub.style.color = '';
       sub.classList.add('visible');
+    } else if (m32 || m64) {
+      // Not in map — show "searching…" and trigger async reverse
+      sub.textContent = '⟳ resolving…';
+      sub.style.color = 'var(--text3)';
+      sub.classList.add('visible');
+
+      // Debounce — wait 600ms before starting brute-force
+      clearTimeout(_subReverseTimer);
+      const hashToResolve = v;
+      _subReverseTimer = setTimeout(() => {
+        reverseHashAsync(
+          hashToResolve,
+          () => {}, // no progress update needed for inline
+          (found) => {
+            if (found) {
+              sub.textContent = found;
+              sub.style.color = '';
+              sub.classList.add('visible');
+            } else {
+              sub.textContent = 'unknown hash';
+              sub.style.color = 'var(--text3)';
+              sub.classList.add('visible');
+            }
+          }
+        );
+      }, 600);
     } else {
       sub.textContent = '';
       sub.classList.remove('visible');
@@ -2395,20 +2432,27 @@ function renderPlayProps(panel, chunk) {
 
   pb.appendChild(propRow('Clip Type',  h8(f.clip.type),  v => { const n=parseHex(v); if(n===null)return; f.clip.type=n; chunk.modified=true; return true; }).row);
   pb.appendChild(propRow('Clip Group', h8(f.clip.group), v => { const n=parseHex(v); if(n===null)return; f.clip.group=n; chunk.modified=true; return true; }).row);
-  // Clip Instance — show name if known
+  // Clip Instance (64-bit) — editable
   {
-    const clipName = f.strData || lookupName64(f.clip.instance.lo, f.clip.instance.hi);
-    const clipRow = propRow('Clip Instance', h64(f.clip.instance.lo, f.clip.instance.hi), null, '', true);
-    if (clipName) {
-      const nt = nameTag(clipName);
-      nt.style.marginLeft = '8px';
-      clipRow.row.querySelector('.prop-value').appendChild(nt);
-    }
-    pb.appendChild(clipRow.row);
+    pb.appendChild(propRow('Clip Instance', h64(f.clip.instance.lo, f.clip.instance.hi), v => {
+      // Accept: 0x{16hex} or just {16hex}
+      const s = v.trim().replace(/^0x/i, '').padStart(16, '0');
+      if (!/^[0-9A-Fa-f]{16}$/.test(s)) return;
+      f.clip.instance.hi = parseInt(s.slice(0, 8), 16) >>> 0;
+      f.clip.instance.lo = parseInt(s.slice(8, 16), 16) >>> 0;
+      chunk.modified = true;
+      return true;
+    }, '64-bit hex — paste Clip IID from S3PE or Hash Calc').row);
   }
 
   pb.appendChild(propRow('TrackMask Type',     h8(f.tkMk.type),  v => { const n=parseHex(v); if(n===null)return; f.tkMk.type=n; chunk.modified=true; return true; }).row);
-  pb.appendChild(propRow('TrackMask Instance', h64(f.tkMk.instance.lo, f.tkMk.instance.hi), null, '', true).row);
+  pb.appendChild(propRow('TrackMask Instance', h64(f.tkMk.instance.lo, f.tkMk.instance.hi), v => {
+    const s = v.trim().replace(/^0x/i,'').padStart(16,'0');
+    if (!/^[0-9A-Fa-f]{16}$/.test(s)) return;
+    f.tkMk.instance.hi = parseInt(s.slice(0,8),16) >>> 0;
+    f.tkMk.instance.lo = parseInt(s.slice(8,16),16) >>> 0;
+    chunk.modified = true; return true;
+  }, '64-bit hex').row);
 
   if (f.strData) {
     const sd = el('div', 'prop-row');
@@ -3515,9 +3559,17 @@ function loadFile(file) {
 
       renderTree();
       renderProps();
+      // 1. Load built-in name dictionary
+      loadBuiltinNames();
+      // 2. Extract substitution strings from Play nodes
       const extracted = extractNamesFromJazz();
-      if (extracted > 0) { updateNameCountBadge(); }
-      notify(`Loaded: ${file.name} — ${state.jazz.count} chunks${extracted ? ` · ${extracted} names extracted` : ''}`);
+      // 3. Try to guess state/param names from patterns
+      const guessed = tryGuessNames(state.jazz.chunks);
+      updateNameCountBadge();
+      const nameParts = [];
+      if (extracted) nameParts.push(`${extracted} extracted`);
+      if (guessed)   nameParts.push(`${guessed} guessed`);
+      notify(`Loaded: ${file.name} — ${state.jazz.count} chunks${nameParts.length ? ` · ${nameParts.join(', ')}` : ''}`);
     } catch (err) {
       alert('Error: ' + err.message);
       console.error(err);
@@ -3699,108 +3751,549 @@ window.confirmModal = function(title, msg, label, onConfirm) {
 // ═══════════════════════════════════════════════════════
 // FNV HASH CALCULATOR
 // ═══════════════════════════════════════════════════════
+// ── FNV-1 (S3PE / Sims 3 standard) ─────────────────────────────
+// S3PE uses FNV-1: multiply FIRST, then XOR (not FNV-1a)
+// Verified against S3PE: "bakersstation_azzazz" → 0x7F494AA6
+
 function fnv32(str) {
   let h = 0x811c9dc5 >>> 0;
   for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
+    h = Math.imul(h, 0x01000193) >>> 0;  // multiply first
+    h ^= str.charCodeAt(i);               // then XOR  (FNV-1)
   }
   return h;
 }
 function fnv32Lower(str) { return fnv32(str.toLowerCase()); }
+
+// FNV-1 64-bit — S3PE initial: 0xcbf29ce484222325, prime: 0x00000100000001B3
+// Stored as {lo, hi} (little-endian: lo = low 32 bits)
 function fnv64(str) {
-  // FNV-1a 64-bit via two 32-bit halves
-  let lo = 0x84222325 >>> 0, hi = 0xcbf29ce4 >>> 0;
+  // Initial basis: 0xcbf29ce484222325
+  //   hi = 0xcbf29ce4, lo = 0x84222325
+  let lo = 0x84222325 >>> 0;
+  let hi = 0xcbf29ce4 >>> 0;
+
   for (let i = 0; i < str.length; i++) {
-    const c = str.charCodeAt(i);
+    const c = str.charCodeAt(i) & 0xFF;
+
+    // Multiply by 0x00000100000001B3 (FNV prime 64-bit)
+    // Split into 32-bit ops:
+    //   newlo = lo * 0x01000193 + lo * 0x0000_0000 (low part)
+    //   We compute (hi:lo) * prime using schoolbook multiplication
+    //
+    //   prime = 0x00000100_000001B3
+    //   lo_prime = 0x000001B3
+    //   hi_prime = 0x00000100
+    const lo_prime = 0x000001B3 >>> 0;
+    const hi_prime = 0x00000100 >>> 0;
+
+    const new_lo = Math.imul(lo, lo_prime) >>> 0;
+    const new_hi = (
+      Math.imul(hi, lo_prime) +
+      Math.imul(lo, hi_prime) +
+      // carry from lo*lo_prime into upper 32 bits
+      Math.floor((lo * lo_prime) / 0x100000000)
+    ) >>> 0;
+
+    lo = new_lo;
+    hi = new_hi;
+
+    // XOR with byte (FNV-1: multiply then XOR)
     lo ^= c;
-    // multiply by 0x00000100000001B3
-    const lo2 = Math.imul(lo, 0x01000193) >>> 0;
-    const hi2 = (Math.imul(hi, 0x01000193) + Math.imul(lo, 0x00000100) + (lo2 < lo ? 1 : 0)) >>> 0;
-    lo = lo2; hi = hi2;
   }
-  return { lo, hi };
+  return { lo: lo >>> 0, hi: hi >>> 0 };
+}
+
+// Clip IID (resource instance ID for .clip files) = FNV64 of anim name
+// Same as FNV64 — Sims 3 derives clip instance IDs this way
+function clipIID(str) { return fnv64(str.toLowerCase()); }
+
+
+// ═══════════════════════════════════════════════════════
+// REVERSE HASH ENGINE
+// Strategy: build a vocabulary from the loaded JAZZ file,
+// then generate candidates via pattern brute-force.
+// No rainbow table needed — we compute on-the-fly.
+// ═══════════════════════════════════════════════════════
+
+// ── Extract vocabulary tokens from the loaded file ────
+// Splits strData strings into individual tokens/segments
+function buildVocabFromFile() {
+  const vocab = new Set(SEED_WORDS);
+  if (!state.jazz) return vocab;
+
+  state.jazz.chunks.forEach(c => {
+    if (!c.fields) return;
+
+    // strData from Play nodes: e.g. "a2o_bakersStation_stir_loop_x"
+    if (c.fields.strData) {
+      const s = c.fields.strData;
+      vocab.add(s);
+      vocab.add(s.toLowerCase());
+      // Split by _ and add each segment
+      s.split('_').forEach(tok => { if (tok.length > 1) { vocab.add(tok); vocab.add(tok.toLowerCase()); } });
+      // Add sub-combinations: prefix_word, word_suffix
+      const parts = s.split('_');
+      for (let i = 0; i < parts.length; i++) {
+        for (let j = i+1; j <= Math.min(parts.length, i+4); j++) {
+          vocab.add(parts.slice(i,j).join('_'));
+          vocab.add(parts.slice(i,j).join('_').toLowerCase());
+        }
+      }
+    }
+
+    // Also collect from nameMap itself (names already known)
+    // This allows the engine to learn from user-loaded maps
+  });
+
+  // Add everything already in nameMap as vocab
+  nameMap.forEach((name) => {
+    if (typeof name === 'string' && name.length < 60) {
+      vocab.add(name);
+      name.split('_').forEach(t => { if (t.length > 1) vocab.add(t); });
+    }
+  });
+
+  return vocab;
+}
+
+// ── FNV32 reverse: try to find a string for a given 32-bit hash ──
+// targetHash: number (uint32)
+// vocab: Set of string tokens
+// Returns: string or null
+function reverseHash32(targetHash, vocab, maxDepth = 3) {
+  targetHash = targetHash >>> 0;
+
+  // 1. Direct lookup first
+  if (nameMap.has(targetHash)) return nameMap.get(targetHash);
+
+  const words = [...vocab];
+  const prefixes = ['', 'a2o_', 'a2a_', 'x2x_', 'o2a_'];
+  const suffixes = ['', '_loop', '_x', '_loop_x', '_idle', '_start', '_end',
+                    '_enter', '_exit', '_0', '_1', '_2'];
+
+  // 2. Single word with prefix/suffix
+  for (const pfx of prefixes) {
+    for (const sfx of suffixes) {
+      for (const w of words) {
+        const candidate = pfx + w + sfx;
+        if (fnv32(candidate.toLowerCase()) === targetHash) {
+          nameMap.set(targetHash, candidate);
+          return candidate;
+        }
+      }
+    }
+  }
+
+  // 3. Two tokens: word_word (only if vocab is small enough)
+  if (words.length <= 300 && maxDepth >= 2) {
+    for (const a of words) {
+      for (const b of words) {
+        if (a === b) continue;
+        const candidate = (a + '_' + b).toLowerCase();
+        if (fnv32(candidate) === targetHash) {
+          nameMap.set(targetHash, candidate);
+          return candidate;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+// ── FNV64 reverse: same approach for 64-bit hashes ───────────────
+function reverseHash64(targetLo, targetHi, vocab) {
+  // Direct lookup first
+  const key = h64(targetLo, targetHi);
+  if (nameMap.has(key)) return nameMap.get(key);
+
+  const words = [...vocab];
+  const prefixes = ['', 'a2o_', 'a2a_', 'x2x_'];
+  const suffixes = ['', '_loop', '_x', '_loop_x', '_idle'];
+
+  for (const pfx of prefixes) {
+    for (const sfx of suffixes) {
+      for (const w of words) {
+        const candidate = (pfx + w + sfx).toLowerCase();
+        const r = fnv64(candidate);
+        if (r.lo === targetLo && r.hi === targetHi) {
+          nameMap.set(key, candidate);
+          return candidate;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// ── Async reverse with progress callback ─────────────────────────
+// onProgress(pct, candidate)  — called periodically
+// onDone(result)              — result is string or null
+function reverseHashAsync(hashStr, onProgress, onDone) {
+  const isHash64 = /^0?[xX]?[0-9A-Fa-f]{16}$/.test(hashStr.replace(/^0x/i,''));
+  const isHash32 = /^0?[xX]?[0-9A-Fa-f]{8}$/.test(hashStr.replace(/^0x/i,''));
+
+  const clean = hashStr.replace(/^0x/i,'').replace(/\s/g,'');
+  let targetLo = 0, targetHi = 0, target32 = 0;
+
+  if (isHash64) {
+    targetHi = parseInt(clean.slice(0,8), 16) >>> 0;
+    targetLo = parseInt(clean.slice(8,16), 16) >>> 0;
+  } else if (isHash32) {
+    target32  = parseInt(clean, 16) >>> 0;
+  } else {
+    onDone(null); return;
+  }
+
+  // Direct lookup first
+  if (isHash32 && nameMap.has(target32))   { onDone(nameMap.get(target32)); return; }
+  if (isHash64 && nameMap.has('0x'+clean.toUpperCase())) {
+    onDone(nameMap.get('0x'+clean.toUpperCase())); return;
+  }
+
+  const vocab  = buildVocabFromFile();
+  const words  = [...vocab].filter(w => w.length > 0 && w.length < 40);
+  const pfxs   = ['', 'a2o_', 'a2a_', 'x2x_', 'o2a_'];
+  const sfxs   = ['', '_loop', '_x', '_loop_x', '_idle', '_start', '_end',
+                  '_enter', '_exit', '_transition', '_0', '_1', '_2', '_3'];
+
+  let i = 0;
+  const total = pfxs.length * sfxs.length * words.length;
+
+  function step() {
+    const batchSize = 2000;
+    for (let b = 0; b < batchSize && i < total; b++, i++) {
+      const pi = Math.floor(i / (sfxs.length * words.length));
+      const si = Math.floor((i % (sfxs.length * words.length)) / words.length);
+      const wi = i % words.length;
+      const candidate = (pfxs[pi] + words[wi] + sfxs[si]).toLowerCase();
+
+      let match = false;
+      if (isHash32) {
+        match = (fnv32(candidate) === target32);
+      } else {
+        const r = fnv64(candidate);
+        match = (r.lo === targetLo && r.hi === targetHi);
+      }
+
+      if (match) {
+        if (isHash32) nameMap.set(target32, candidate);
+        else nameMap.set('0x'+clean.toUpperCase(), candidate);
+        updateNameCountBadge();
+        renderTree(); renderProps();
+        onDone(candidate);
+        return;
+      }
+    }
+
+    if (i >= total) {
+      // Phase 2: try two-word combinations if vocab is small
+      if (words.length <= 200) {
+        twoWordSearch(words, isHash32, target32, targetLo, targetHi, clean, onProgress, onDone);
+      } else {
+        onProgress(100, null);
+        onDone(null);
+      }
+      return;
+    }
+
+    onProgress(Math.round(i / total * 80), words[i % words.length]);
+    setTimeout(step, 0);
+  }
+
+  setTimeout(step, 0);
+}
+
+function twoWordSearch(words, isHash32, target32, targetLo, targetHi, clean, onProgress, onDone) {
+  let i = 0;
+  const total = words.length * words.length;
+
+  function step() {
+    const batchSize = 1000;
+    for (let b = 0; b < batchSize && i < total; b++, i++) {
+      const a = words[Math.floor(i / words.length)];
+      const bw = words[i % words.length];
+      const candidate = (a + '_' + bw).toLowerCase();
+
+      let match = false;
+      if (isHash32) {
+        match = (fnv32(candidate) === target32);
+      } else {
+        const r = fnv64(candidate);
+        match = (r.lo === targetLo && r.hi === targetHi);
+      }
+
+      if (match) {
+        if (isHash32) nameMap.set(target32, candidate);
+        else nameMap.set('0x'+clean.toUpperCase(), candidate);
+        updateNameCountBadge();
+        renderTree(); renderProps();
+        onDone(candidate);
+        return;
+      }
+    }
+
+    if (i >= total) { onProgress(100, null); onDone(null); return; }
+    onProgress(80 + Math.round(i / total * 20), null);
+    setTimeout(step, 0);
+  }
+  setTimeout(step, 0);
+}
+
+// ── Run reverse lookup on all unknown hashes in loaded file ──────
+function reverseAllUnknownHashes(onDone) {
+  if (!state.jazz) { onDone(0); return; }
+
+  const unknowns = [];
+  state.jazz.chunks.forEach(c => {
+    if (!c.fields) return;
+    const f = c.fields;
+    const add32 = h => { if (h && !nameMap.has(h>>>0)) unknowns.push({type:32, val:h>>>0}); };
+    const add64 = (lo,hi) => {
+      const k='0x'+h64(lo,hi).slice(2).toUpperCase();
+      if (!nameMap.has(k)) unknowns.push({type:64,lo,hi,key:k});
+    };
+    if (f.stateName)      add32(f.stateName);
+    if (f.parameterName)  add32(f.parameterName);
+    if (f.paramName)      add32(f.paramName);
+    if (f.name)           add32(f.name);
+    if (c.type===0x02eedb5f && f.clip) add64(f.clip.instance.lo, f.clip.instance.hi);
+  });
+
+  if (!unknowns.length) { onDone(0); return; }
+
+  const vocab = buildVocabFromFile();
+  let resolved = 0, idx = 0;
+
+  function next() {
+    if (idx >= unknowns.length) { onDone(resolved); return; }
+    const u = unknowns[idx++];
+    let result = null;
+    if (u.type === 32) result = reverseHash32(u.val, vocab, 2);
+    else result = reverseHash64(u.lo, u.hi, vocab);
+    if (result) resolved++;
+    setTimeout(next, 0);
+  }
+  next();
 }
 
 function openHashCalc() {
   openSidePanel('🔢 FNV Hash Calculator', body => {
+
+    // ── Mode toggle ───────────────────────────────────────
+    const modeRow = document.createElement('div');
+    modeRow.style.cssText = 'display:flex;gap:2px;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:2px;margin-bottom:10px;';
+
+    function modeBtn(label, active) {
+      const b = document.createElement('button');
+      b.className = 'tb-btn' + (active ? ' active' : '');
+      b.style.cssText = 'flex:1;justify-content:center;height:26px;font-size:11px;';
+      b.textContent = label;
+      return b;
+    }
+    const btnModeForward = modeBtn('string → hash ▶', true);
+    const btnModeReverse = modeBtn('◀ hash → string', false);
+    modeRow.appendChild(btnModeForward);
+    modeRow.appendChild(btnModeReverse);
+    body.appendChild(modeRow);
+
+    // ── Input ─────────────────────────────────────────────
     const inp = document.createElement('input');
-    inp.className = 'form-input'; inp.placeholder = 'Enter string (e.g. StateName)';
-    inp.style.marginBottom = '8px';
+    inp.className = 'form-input';
+    inp.placeholder = 'Enter string (e.g. bakersstation_azzazz)';
     body.appendChild(inp);
+
+    const hint = document.createElement('div');
+    hint.className = 'form-hint';
+    hint.style.marginBottom = '8px';
+    hint.textContent = 'Type a name to compute its hashes (FNV-1, S3PE-compatible)';
+    body.appendChild(hint);
 
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
     const btnCalc = document.createElement('button');
-    btnCalc.className = 'btn btn-action btn-add'; btnCalc.textContent = '# Calculate';
+    btnCalc.className = 'btn btn-action btn-add';
+    btnCalc.textContent = '▶ Calculate';
     btnCalc.style.flex = '1';
     btnRow.appendChild(btnCalc);
     const btnClear = document.createElement('button');
     btnClear.className = 'btn btn-open'; btnClear.textContent = '✕';
-    btnClear.onclick = () => { inp.value = ''; results.innerHTML = ''; };
+    btnClear.onclick = () => { inp.value = ''; results.innerHTML = ''; progress.style.display='none'; };
     btnRow.appendChild(btnClear);
     body.appendChild(btnRow);
 
+    // ── Progress bar (for reverse mode) ──────────────────
+    const progress = document.createElement('div');
+    progress.style.cssText = 'display:none;flex-direction:column;gap:4px;margin-bottom:8px;';
+    const progBar = document.createElement('div');
+    progBar.style.cssText = 'height:3px;background:var(--border);border-radius:2px;overflow:hidden;';
+    const progFill = document.createElement('div');
+    progFill.style.cssText = 'height:100%;background:var(--accent2);width:0%;transition:width 0.1s;border-radius:2px;';
+    progBar.appendChild(progFill);
+    const progLabel = document.createElement('div');
+    progLabel.className = 'form-hint';
+    progress.appendChild(progBar);
+    progress.appendChild(progLabel);
+    body.appendChild(progress);
+
+    // ── Results ───────────────────────────────────────────
     const results = document.createElement('div');
     results.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
     body.appendChild(results);
 
-    // History section
+    // ── History ───────────────────────────────────────────
     const histTitle = document.createElement('div');
-    histTitle.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-top:8px;';
+    histTitle.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-top:10px;';
     histTitle.textContent = 'Recent';
     body.appendChild(histTitle);
     const histList = document.createElement('div');
-    histList.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+    histList.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
     body.appendChild(histList);
 
     const hashHistory = [];
+    let isReverseMode = false;
+    let reverseActive = false;
 
-    function calcAndShow() {
-      const s = inp.value;
-      if (!s) return;
+    function addHistory(s) {
+      if (hashHistory.includes(s)) return;
+      hashHistory.unshift(s);
+      if (hashHistory.length > 12) hashHistory.pop();
+      histList.innerHTML = '';
+      hashHistory.forEach(hs => {
+        const hd = document.createElement('div');
+        hd.style.cssText = 'padding:3px 8px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--text2);border-radius:3px;display:flex;justify-content:space-between;gap:8px;';
+        const isHash = /^0x[0-9a-f]{8,16}$/i.test(hs);
+        hd.innerHTML = `<span>${hs}</span><span style="color:var(--text3);font-size:10px">${isHash?'hash':'string'}</span>`;
+        hd.addEventListener('mouseenter', () => hd.style.background='var(--bg3)');
+        hd.addEventListener('mouseleave', () => hd.style.background='');
+        hd.onclick = () => { inp.value = hs; run(); };
+        histList.appendChild(hd);
+      });
+    }
+
+    function makeResult(label, valHex, found) {
+      const d = document.createElement('div');
+      d.className = 'hash-result';
+      if (found) d.style.borderColor = 'var(--accent3)';
+      d.innerHTML = `<span><span class="hr-label">${label}</span><br><b style="color:${found?'var(--accent3)':''}">${valHex}</b></span><span class="hr-copy" title="Copy">📋</span>`;
+      d.querySelector('.hr-copy').onclick = () => { navigator.clipboard?.writeText(valHex); notify(`Copied: ${valHex}`); };
+      return d;
+    }
+
+    function forwardMode(s) {
       const f32  = fnv32(s);
-      const f32l = fnv32Lower(s);
+      const f32l = fnv32(s.toLowerCase());
       const f64  = fnv64(s);
       const f64l = fnv64(s.toLowerCase());
+      const cliid = clipIID(s);
 
       results.innerHTML = '';
 
-      function makeResult(label, valHex) {
-        const d = document.createElement('div');
-        d.className = 'hash-result';
-        d.innerHTML = `<span><span class="hr-label">${label}</span><br><b>${valHex}</b></span><span class="hr-copy" title="Copy">📋</span>`;
-        d.querySelector('.hr-copy').onclick = () => { navigator.clipboard?.writeText(valHex); notify(`Copied: ${valHex}`); };
-        return d;
-      }
+      // Register in name map
+      nameMap.set(f32l, s.toLowerCase());
+      nameMap.set(f32, s);
+      nameMap.set(h64(f64l.lo, f64l.hi), s.toLowerCase());
+      updateNameCountBadge();
 
-      // Check if hash already known in map (reverse lookup)
-      const existing32 = lookupName(f32l) || lookupName(f32);
-      if (!existing32) { nameMap.set(f32l, s); updateNameCountBadge(); }
-      results.appendChild(makeResult('FNV32 (exact case)', h8(f32)));
-      results.appendChild(makeResult('FNV32 (lowercase)', h8(f32l)));
-      results.appendChild(makeResult('FNV64 (exact case)', h64(f64.lo, f64.hi)));
-      results.appendChild(makeResult('FNV64 (lowercase)', h64(f64l.lo, f64l.hi)));
-
-      // Add to history
-      if (!hashHistory.includes(s)) {
-        hashHistory.unshift(s);
-        if (hashHistory.length > 10) hashHistory.pop();
-        histList.innerHTML = '';
-        hashHistory.forEach(hs => {
-          const hd = document.createElement('div');
-          hd.style.cssText = 'padding:3px 6px;cursor:pointer;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--text2);border-radius:3px;';
-          hd.textContent = hs;
-          hd.addEventListener('mouseenter', () => hd.style.background='var(--bg3)');
-          hd.addEventListener('mouseleave', () => hd.style.background='');
-          hd.onclick = () => { inp.value = hs; calcAndShow(); };
-          histList.appendChild(hd);
-        });
-      }
+      results.appendChild(makeResult('FNV32', h8(f32)));
+      results.appendChild(makeResult('FNV32 lowercase', h8(f32l)));
+      results.appendChild(makeResult('FNV64', h64(f64.lo, f64.hi)));
+      results.appendChild(makeResult('FNV64 lowercase', h64(f64l.lo, f64l.hi)));
+      results.appendChild(makeResult('Clip IID (FNV64 lower)', h64(cliid.lo, cliid.hi)));
+      addHistory(s);
     }
 
-    btnCalc.addEventListener('click', calcAndShow);
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter') calcAndShow(); });
+    function reverseMode(hashStr) {
+      results.innerHTML = '';
+      hashStr = hashStr.trim();
+      if (!/^0?[xX]?[0-9A-Fa-f]{8,16}$/.test(hashStr)) {
+        results.innerHTML = '<div class="form-hint" style="color:var(--error)">Enter a valid 8 or 16 char hex hash (e.g. 0x7F494AA6)</div>';
+        return;
+      }
+
+      // Quick direct lookup first
+      const clean = hashStr.replace(/^0x/i,'').toUpperCase();
+      let directResult = null;
+      if (clean.length === 8) directResult = nameMap.get(parseInt(clean, 16) >>> 0);
+      else directResult = nameMap.get('0x' + clean);
+
+      if (directResult) {
+        results.appendChild(makeResult('Found in name map', directResult, true));
+        addHistory(hashStr);
+        return;
+      }
+
+      // Start brute-force
+      if (reverseActive) return;
+      reverseActive = true;
+      progress.style.display = 'flex';
+      progFill.style.width = '0%';
+      progLabel.textContent = 'Building vocabulary from file…';
+
+      results.innerHTML = '<div class="form-hint">Searching… (uses vocabulary from your loaded JAZZ file)</div>';
+
+      reverseHashAsync(
+        hashStr,
+        (pct, current) => {
+          progFill.style.width = pct + '%';
+          if (current) progLabel.textContent = `Trying: ${current}…`;
+        },
+        (found) => {
+          reverseActive = false;
+          progress.style.display = 'none';
+          results.innerHTML = '';
+          if (found) {
+            results.appendChild(makeResult('✅ Found!', found, true));
+            const verifyHash = clean.length === 8
+              ? h8(fnv32(found))
+              : h64(fnv64(found).lo, fnv64(found).hi);
+            results.appendChild(makeResult('Verify hash', verifyHash));
+            addHistory(hashStr);
+            addHistory(found);
+            renderTree(); renderProps();
+          } else {
+            const noMatch = document.createElement('div');
+            noMatch.className = 'form-hint';
+            noMatch.style.color = 'var(--warn)';
+            noMatch.innerHTML = `❌ Not found with current vocabulary (${buildVocabFromFile().size} words).<br><br>💡 Load more names via <b>𝑁 Names → 📂 Load file</b> to expand the vocabulary, then try again.`;
+            results.appendChild(noMatch);
+          }
+        }
+      );
+    }
+
+    function run() {
+      const s = inp.value.trim();
+      if (!s) return;
+      if (isReverseMode) reverseMode(s);
+      else forwardMode(s);
+    }
+
+    // Mode switching
+    btnModeForward.onclick = () => {
+      isReverseMode = false;
+      btnModeForward.classList.add('active');
+      btnModeReverse.classList.remove('active');
+      inp.placeholder = 'Enter string (e.g. bakersstation_azzazz)';
+      hint.textContent = 'Type a name to compute its hashes (FNV-1, S3PE-compatible)';
+      btnCalc.textContent = '▶ Calculate';
+      results.innerHTML = '';
+      progress.style.display = 'none';
+    };
+    btnModeReverse.onclick = () => {
+      isReverseMode = true;
+      btnModeReverse.classList.add('active');
+      btnModeForward.classList.remove('active');
+      inp.placeholder = '0x7F494AA6  or  0x3CCE90E7AC340BE6';
+      hint.textContent = 'Paste a hash to find its original string using vocabulary from your JAZZ file';
+      btnCalc.textContent = '◀ Reverse';
+      results.innerHTML = '';
+      progress.style.display = 'none';
+    };
+
+    btnCalc.addEventListener('click', run);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
     setTimeout(() => inp.focus(), 50);
   });
 }
@@ -4314,6 +4807,12 @@ function propRowWithName(label, hash, onChange, hint) {
 //   {name}                   just names (compute FNV32 lower)
 //   // or # comment lines are skipped
 function parseNameMapText(text) {
+  // Delegate to the unified parser
+  const r1 = parseKeyNameMapText(text);
+  return { added: r1, skipped: 0 };
+}
+
+function _parseNameMapText_orig(text) {
   let added = 0, skipped = 0;
   const lines = text.split(/\r?\n/);
   for (let line of lines) {
@@ -4415,13 +4914,24 @@ function openNamesPanel() {
     btnExtract.textContent = '⟳ Extract from JAZZ';
     btnExtract.title = 'Auto-extract names from substitution strings in Play nodes';
     btnExtract.onclick = () => {
-      const n = extractNamesFromJazz();
-      notify(`Extracted ${n} names from JAZZ file`);
+      loadBuiltinNames();
+      const n1 = extractNamesFromJazz();
+      const n2 = state.jazz ? tryGuessNames(state.jazz.chunks) : 0;
+      notify(`Extracted ${n1} + guessed ${n2} names`);
       updateNameCountBadge();
       refreshList();
       renderTree(); renderProps();
     };
     uploadRow.appendChild(btnExtract);
+
+    // Hint if no names
+    if (nameMap.size < 10) {
+      const hint2 = document.createElement('div');
+      hint2.className = 'form-hint';
+      hint2.style.cssText = 'color:var(--warn);margin-top:4px;';
+      hint2.innerHTML = '💡 <b>Tip:</b> Load a <b>KeyNameMap</b> text export from SmoothJazz, or a plain list of animation names to see human-readable labels everywhere.';
+      uploadSection.appendChild(hint2);
+    }
     uploadSection.appendChild(uploadRow);
 
     fileInput.addEventListener('change', e => {
@@ -4496,6 +5006,25 @@ function openNamesPanel() {
     // Export / clear buttons
     const ctrlRow = document.createElement('div');
     ctrlRow.style.cssText = 'display:flex;gap:6px;margin-top:2px;';
+
+    const btnReverseAll = document.createElement('button');
+    btnReverseAll.className = 'btn btn-action btn-add';
+    btnReverseAll.style.cssText = 'padding:4px 10px;font-size:11px;';
+    btnReverseAll.textContent = '🔎 Reverse all unknowns';
+    btnReverseAll.title = 'Try to brute-force resolve all unknown hashes in the loaded file';
+    btnReverseAll.onclick = () => {
+      btnReverseAll.disabled = true;
+      btnReverseAll.textContent = '⟳ Working…';
+      reverseAllUnknownHashes(resolved => {
+        btnReverseAll.disabled = false;
+        btnReverseAll.textContent = '🔎 Reverse all unknowns';
+        notify(`Resolved ${resolved} additional hash${resolved!==1?'es':''}`);
+        updateNameCountBadge();
+        refreshList();
+        renderTree(); renderProps();
+      });
+    };
+    ctrlRow.appendChild(btnReverseAll);
 
     const btnExportMap = document.createElement('button');
     btnExportMap.className = 'btn btn-open';
@@ -4596,6 +5125,114 @@ function openNamesPanel() {
 }
 
 document.getElementById('btnNames').addEventListener('click', openNamesPanel);
+
+
+// ═══════════════════════════════════════════════════════
+// BUILT-IN SIMS 3 NAME DATABASE
+// Sourced from common Sims 3 animation state naming conventions
+// ═══════════════════════════════════════════════════════
+
+// Minimal seed vocabulary — just enough to bootstrap pattern matching
+// Real names come from: 1) strData extraction, 2) reverse brute-force
+const SEED_WORDS = [
+  'idle','loop','enter','exit','start','stop','end','default',
+  'walk','run','stand','sit','sleep','transition','play','loop_x',
+  'a2o','a2a','o2a','x2x',
+];
+
+function loadBuiltinNames() {
+  // Seed only — main names come from extractNamesFromJazz + reverse lookup
+  let added = 0;
+  for (const name of SEED_WORDS) {
+    const h = fnv32(name.toLowerCase());
+    if (!nameMap.has(h)) { nameMap.set(h, name); added++; }
+  }
+  return added;
+}
+
+// ── Parse SmoothJazz KeyNameMap format ───────────────────────────
+// SmoothJazz stores maps as: InstanceID (uint64 hex) TAB name
+// OR as a packed binary .map — we support the text/export form
+function parseKeyNameMapText(text) {
+  let added = 0;
+  const lines = text.split(/\r?\n/);
+  for (let line of lines) {
+    line = line.trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+
+    // KeyNameMap export: 0x{16hex}\t{name}  or  {16hex}\t{name}
+    let m = line.match(/^0?[xX]?([0-9A-Fa-f]{16})\s+(.+)$/);
+    if (m) {
+      const key = '0x' + m[1].toUpperCase();
+      const name = m[2].trim();
+      if (name && !nameMap.has(key)) { nameMap.set(key, name); added++; }
+      // Also compute FNV32 of name → for state name lookups
+      const h32 = fnv32Lower(name);
+      if (!nameMap.has(h32)) { nameMap.set(h32, name); added++; }
+      continue;
+    }
+
+    // 8-char hash: 0x{8hex}\t{name}
+    m = line.match(/^0?[xX]?([0-9A-Fa-f]{8})\s+(.+)$/);
+    if (m) {
+      const h = parseInt(m[1], 16) >>> 0;
+      const name = m[2].trim();
+      if (name && !nameMap.has(h)) { nameMap.set(h, name); added++; }
+      continue;
+    }
+
+    // Just a name — compute FNV32
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(line)) {
+      const h = fnv32Lower(line);
+      if (!nameMap.has(h)) { nameMap.set(h, line); added++; }
+      added++;
+    }
+  }
+  return added;
+}
+
+// ── Try to guess state names from hash by brute-forcing
+//    common Sims 3 naming patterns ──────────────────────────────
+function tryGuessNames(chunks) {
+  // Collect all unique 32-bit hashes used in the file
+  const unknownHashes = new Set();
+  chunks.forEach(c => {
+    if (!c.fields) return;
+    const f = c.fields;
+    if (f.stateName && !nameMap.has(f.stateName)) unknownHashes.add(f.stateName >>> 0);
+    if (f.parameterName && !nameMap.has(f.parameterName)) unknownHashes.add(f.parameterName >>> 0);
+    if (f.paramName && !nameMap.has(f.paramName)) unknownHashes.add(f.paramName >>> 0);
+  });
+
+  // Try strData patterns from Play nodes as prefix hints
+  const prefixes = new Set(['']);
+  chunks.forEach(c => {
+    if (c.type === 0x02eedb5f && c.fields?.strData) {
+      const parts = c.fields.strData.split('_');
+      // Extract object prefix: e.g. "a2o_bakersStation" → "bakersStation"
+      if (parts.length >= 2) {
+        prefixes.add(parts.slice(0,2).join('_') + '_');
+        prefixes.add(parts[1] + '_');
+      }
+    }
+  });
+
+  let guessed = 0;
+  // Try common state suffixes with extracted prefixes
+  const suffixes = ['idle','loop','enter','exit','start','stop',
+    'loop_x','idle_x','transition','stand','sit','walk','run'];
+  for (const pfx of prefixes) {
+    for (const sfx of suffixes) {
+      const candidate = pfx + sfx;
+      const h = fnv32Lower(candidate);
+      if (unknownHashes.has(h) && !nameMap.has(h)) {
+        nameMap.set(h, candidate);
+        guessed++;
+      }
+    }
+  }
+  return guessed;
+}
 
 // Init
 setupDropZone();
