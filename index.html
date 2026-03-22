@@ -1461,9 +1461,9 @@ function serializeChunkBody(chunk) {
   if (chunk.type === 0x02d5df13) {
     const f = chunk.fields;
     w.u32(f.name);
-    w.i32(f.actorDefs.length); f.actorDefs.forEach(i => w.u32(encodeIdx(i)));
-    w.i32(f.paramDefs.length); f.paramDefs.forEach(i => w.u32(encodeIdx(i)));
-    w.i32(f.states.length); f.states.forEach(i => w.u32(encodeIdx(i)));
+    {const _v=f.actorDefs.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
+    {const _v=f.paramDefs.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
+    {const _v=f.states.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
     w.i32(f.actorAssignments.length);
     f.actorAssignments.forEach(a => { w.u32(a.animName); w.u32(a.animActor); w.u32(a.actor); });
     w.u32(0xDEADBEEF);
@@ -1474,14 +1474,14 @@ function serializeChunkBody(chunk) {
     const f = chunk.fields;
     w.u32(f.stateName); w.u32(f.stateProperties);
     w.u32(encodeIdx(f.dgIndex));
-    w.i32(f.transitions.length); f.transitions.forEach(i => w.u32(encodeIdx(i)));
+    {const _v=f.transitions.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
     f.unknowns.forEach(u => w.u32(u));
 
   } else if (chunk.type === 0x02eedb18) {
     const f = chunk.fields;
     f.unknowns.forEach(u => w.u32(u));
-    w.i32(f.allNodes.length); f.allNodes.forEach(i => w.u32(encodeIdx(i)));
-    w.i32(f.graphRoot.length); f.graphRoot.forEach(i => w.u32(encodeIdx(i)));
+    {const _v=f.allNodes.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
+    {const _v=f.graphRoot.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
     w.u32(0xDEADBEEF);
 
   } else if (chunk.type === 0x02eedb2f) {
@@ -1507,7 +1507,7 @@ function serializeChunkBody(chunk) {
     w.u32(encodeIdx(f.actorIdx)); w.i32(f.priority2);
     f.animUnk3.forEach(u => w.u32(u));
     w.u32(0xDEADBEEF);
-    w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    {const _v=f.actions.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
     w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x0344d438) {
@@ -1519,7 +1519,7 @@ function serializeChunkBody(chunk) {
     w.u32(encodeIdx(f.actorIdx)); w.i32(f.priority2);
     f.animUnk3.forEach(u => w.u32(u));
     w.u32(0xDEADBEEF);
-    w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    {const _v=f.actions.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
     w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x02eedb70) {
@@ -1539,7 +1539,7 @@ function serializeChunkBody(chunk) {
     f.propUnk1.forEach(u => w.u32(u));
     writeResKey(w, f.catalogRef);
     f.propUnk2.forEach(u => w.u32(u));
-    w.i32(f.actions.length); f.actions.forEach(i => w.u32(encodeIdx(i)));
+    {const _v=f.actions.filter(i=>i!==null);w.i32(_v.length);_v.forEach(i=>w.u32(encodeIdx(i)));}
     w.fourcc('/DGN'); // ActionBase suffix
 
   } else if (chunk.type === 0x02eeebdc) {
@@ -2799,28 +2799,31 @@ function updateIdxRef(i, deletedIdx) {
 
 function updateAllRefsAfterDelete(deletedIdx) {
   const chunks = state.jazz.chunks;
+  const nn = arr => arr.map(i => updateIdxRef(i, deletedIdx)).filter(i => i !== null);
   for (const c of chunks) {
     if (!c.fields) continue;
     c.modified = true; // ref indices changed → must re-serialize
     const f = c.fields;
 
-    // StateMachine
-    if (f.actorDefs)  f.actorDefs  = f.actorDefs.map(i => updateIdxRef(i, deletedIdx));
-    if (f.paramDefs)  f.paramDefs  = f.paramDefs.map(i => updateIdxRef(i, deletedIdx));
-    if (f.states)     f.states     = f.states.map(i => updateIdxRef(i, deletedIdx));
+    // StateMachine — filter nulls so count is always accurate
+    if (f.actorDefs)   f.actorDefs   = nn(f.actorDefs);
+    if (f.paramDefs)   f.paramDefs   = nn(f.paramDefs);
+    if (f.states)      f.states      = nn(f.states);
     // State
-    if ('dgIndex' in f)   f.dgIndex    = updateIdxRef(f.dgIndex, deletedIdx);
-    if (f.transitions)    f.transitions = f.transitions.map(i => updateIdxRef(i, deletedIdx));
-    // DecisionGraph
-    if (f.allNodes)   f.allNodes   = f.allNodes.map(i => updateIdxRef(i, deletedIdx));
-    if (f.graphRoot)  f.graphRoot  = f.graphRoot.map(i => updateIdxRef(i, deletedIdx));
+    if ('dgIndex' in f)    f.dgIndex    = updateIdxRef(f.dgIndex, deletedIdx);
+    if (f.transitions)     f.transitions = nn(f.transitions);
+    // DecisionGraph — filter nulls so allNodes/graphRoot count is accurate
+    if (f.allNodes)    f.allNodes    = nn(f.allNodes);
+    if (f.graphRoot)   f.graphRoot   = nn(f.graphRoot);
     // Animation nodes
-    if (f.actions)    f.actions    = f.actions.map(i => updateIdxRef(i, deletedIdx));
-    if ('actorIdx' in f)  f.actorIdx  = updateIdxRef(f.actorIdx, deletedIdx);
-    if ('actorIdx2' in f) f.actorIdx2 = updateIdxRef(f.actorIdx2, deletedIdx);
-    if ('stateIdx' in f)  f.stateIdx  = updateIdxRef(f.stateIdx, deletedIdx);
+    if (f.actions)     f.actions     = nn(f.actions);
+    if ('actorIdx' in f)   f.actorIdx  = updateIdxRef(f.actorIdx, deletedIdx);
+    if ('actorIdx2' in f)  f.actorIdx2 = updateIdxRef(f.actorIdx2, deletedIdx);
+    if ('stateIdx' in f)   f.stateIdx  = updateIdxRef(f.stateIdx, deletedIdx);
     // Random choices
-    if (f.choices) f.choices.forEach(c => { c.actions = c.actions.map(i => updateIdxRef(i, deletedIdx)); });
+    if (f.choices) f.choices.forEach(ch => { ch.actions = nn(ch.actions); });
+    // SelectOnParameter cases
+    if (f.cases) f.cases.forEach(cas => { cas.actions = nn(cas.actions); });
   }
   // Update selIdx
   if (state.selIdx === deletedIdx) state.selIdx = null;
