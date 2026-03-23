@@ -2229,8 +2229,12 @@ function renderDGProps(panel, chunk) {
   pb.appendChild(propRow('Sentinel', f.sentinel === 0xDEADBEEF ? '✅ 0xDEADBEEF' : `❌ ${h8(f.sentinel)}`, null, '', true).row);
   panel.appendChild(ps);
 
-  // Root nodes
-  const { section: rs, body: rb } = section(`▶ Root Nodes (${f.graphRoot.length})`, 'var(--node-color)');
+  // Root nodes = Entry points (graphRoot) — first nodes executed when DG runs
+  const { section: rs, body: rb } = section(`▶ Entry Points / graphRoot (${f.graphRoot.length})`, 'var(--node-color)');
+  const rootHint = el('div', 'form-hint');
+  rootHint.style.cssText = 'padding:4px 10px 2px;color:var(--text3)';
+  rootHint.textContent = 'Nodes executed first when this DecisionGraph is triggered. Order matters.';
+  rs.querySelector('.prop-section-body')?.prepend(rootHint) || rb.before(rootHint);
   f.graphRoot.forEach((idx, i) => {
     if (idx === null) return;
     const nc = all[idx];
@@ -2250,8 +2254,8 @@ function renderDGProps(panel, chunk) {
   if (f.graphRoot.length === 0) rb.appendChild(el('div', 'no-items', 'No root nodes'));
   panel.appendChild(rs);
 
-  // All nodes — sortable, with move + delete per node
-  const { section: as, body: ab } = section(`📋 All Nodes (${f.allNodes.length}) — drag to reorder`, 'var(--node-color)');
+  // All nodes = candidate pool — must contain all nodes referenced anywhere in DG
+  const { section: as, body: ab } = section(`📋 Candidate Pool / allNodes (${f.allNodes.length}) — drag to reorder`, 'var(--node-color)');
 
   if (f.allNodes.length === 0) {
     ab.appendChild(el('div', 'no-items', 'No nodes'));
@@ -2428,7 +2432,17 @@ function animCommonSection(panel, chunk, f) {
 function renderPlayProps(panel, chunk) {
   const f = chunk.fields;
 
-  const { section: ps, body: pb } = section('▶ Play Animation', 'var(--node-color)');
+  const isNullClip = f.clip && f.clip.instance.lo === 0 && f.clip.instance.hi === 0 && !f.strData;
+  const { section: ps, body: pb } = section(
+    isNullClip ? '▶ Play Animation ⚠ NULL CLIP' : '▶ Play Animation',
+    isNullClip ? 'var(--error)' : 'var(--node-color)'
+  );
+  if (isNullClip) {
+    const warn = el('div', 'val-error');
+    warn.style.cssText = 'padding:6px 10px;font-size:11px;border-left:3px solid var(--error);margin-bottom:6px;';
+    warn.textContent = '⛔ Clip Instance is 0x0 — sim will FREEZE when this animation plays! Set a valid Clip IID.';
+    pb.appendChild(warn);
+  }
 
   pb.appendChild(propRow('Clip Type',  h8(f.clip.type),  v => { const n=parseHex(v); if(n===null)return; f.clip.type=n; chunk.modified=true; return true; }).row);
   pb.appendChild(propRow('Clip Group', h8(f.clip.group), v => { const n=parseHex(v); if(n===null)return; f.clip.group=n; chunk.modified=true; return true; }).row);
@@ -2839,12 +2853,44 @@ function updateAllRefsAfterDelete(deletedIdx) {
 }
 
 // ─── Delete a chunk entirely from the file ───────────
+// Count how many chunks reference a given index
+function countRefsTo(targetIdx) {
+  if (!state.jazz) return 0;
+  let count = 0;
+  state.jazz.chunks.forEach(c => {
+    if (!c.fields) return;
+    const f = c.fields;
+    const check = i => { if (i === targetIdx) count++; };
+    (f.actorDefs||[]).forEach(check); (f.paramDefs||[]).forEach(check);
+    (f.states||[]).forEach(check); (f.transitions||[]).forEach(check);
+    if (f.dgIndex === targetIdx) count++;
+    (f.allNodes||[]).forEach(check); (f.graphRoot||[]).forEach(check);
+    (f.actions||[]).forEach(check);
+    if (f.actorIdx === targetIdx) count++;
+    if (f.actorIdx2 === targetIdx) count++;
+    if (f.stateIdx === targetIdx) count++;
+    if (f.choices) f.choices.forEach(ch => ch.actions.forEach(check));
+    if (f.cases)   f.cases.forEach(cas => cas.actions.forEach(check));
+    if (f.paramIdx === targetIdx) count++;
+  });
+  return count;
+}
+
 function deleteChunk(idx) {
   const chunk = state.jazz.chunks[idx];
   const name = `${chunk.typeName} #${idx}`;
+  // Count how many other chunks reference this one
+  const refCount = countRefsTo(idx);
+  const refWarning = refCount > 0
+    ? `<br><br><span style="color:var(--warn)">⚠ ${refCount} other chunk(s) reference this — those refs will be nulled.</span>`
+    : '';
+  // Warn about index shift
+  const shiftWarning = idx < state.jazz.chunks.length - 1
+    ? `<br><span style="color:var(--text3);font-size:10px">All chunk indices above #${idx} will shift down by 1 and all references will be updated automatically.</span>`
+    : '';
   confirmModal(
     '🗑 Delete Chunk',
-    `Delete <b>${name}</b> from the file?<br><br>All references to this chunk will be nulled. This cannot be undone.`,
+    `Delete <b>${name}</b> from the file?${refWarning}${shiftWarning}<br><br>This cannot be undone.`,
     '🗑 Delete',
     () => {
       state.jazz.chunks.splice(idx, 1);
@@ -4447,12 +4493,57 @@ function validateJazz() {
     // PlayAnimation
     if (c.type === 0x02eedb5f) {
       if (f.actorIdx !== null) checkRef('actorIdx', f.actorIdx);
+      // NULL clip → sim will freeze waiting for animation that never completes
+      if (f.clip && f.clip.instance.lo === 0 && f.clip.instance.hi === 0 && !f.strData)
+        issues.push({ sev:'error', msg:`${loc}: Clip Instance is 0x0 — sim will FREEZE (game waits for animation that never plays)`, idx: c.index });
+      // Clip type should be 0x6b20c4f3 unless it's a substitution
+      if (f.clip && f.clip.type !== 0x6b20c4f3 && !f.strData && !(f.clip.instance.lo === 0 && f.clip.instance.hi === 0))
+        issues.push({ sev:'warn', msg:`${loc}: Clip Type is ${h8(f.clip.type)}, expected 0x6B20C4F3 — may not play`, idx: c.index });
       if (f.sentinel1 !== 0xDEADBEEF || f.sentinel2 !== 0xDEADBEEF || f.sentinel3 !== 0xDEADBEEF)
-        issues.push({ sev:'warn', msg:`${loc}: One or more sentinels are bad`, idx: c.index });
+        issues.push({ sev:'error', msg:`${loc}: Bad sentinel — file may be corrupt`, idx: c.index });
     }
     // Stop
     if (c.type === 0x0344d438) {
       if (f.actorIdx !== null) checkRef('actorIdx', f.actorIdx);
+    }
+    // DecisionGraph extra checks
+    if (c.type === 0x02eedb18) {
+      // graphRoot nodes not in allNodes → engine can't find entry point
+      (f.graphRoot||[]).forEach(i => {
+        if (i !== null && !(f.allNodes||[]).includes(i))
+          issues.push({ sev:'error', msg:`${loc}: Entry node #${i} is in graphRoot but NOT in allNodes — engine cannot execute this DG`, idx: c.index });
+      });
+      // DG with nodes but no entry point
+      if ((f.allNodes||[]).length > 0 && (f.graphRoot||[]).length === 0)
+        issues.push({ sev:'warn', msg:`${loc}: Has ${f.allNodes.length} node(s) but graphRoot is empty — no entry point, DG will not execute`, idx: c.index });
+      // allNodes with unknown chunk types
+      (f.allNodes||[]).forEach((i,n) => {
+        if (i === null) return;
+        const nc = chunks[i];
+        if (nc && ![0x02eedb5f, 0x0344d438, 0x02eedb70, 0x02eeebdd, 0x02eeebdc, 0x02eeebde, 0x02eedb92].includes(nc.type))
+          issues.push({ sev:'warn', msg:`${loc}: allNodes[${n}] = #${i} is ${nc.typeName} — unexpected node type in DG`, idx: c.index });
+      });
+    }
+    // State checks
+    if (c.type === 0x02eedafe) {
+      // State with no DG and no transitions — completely inert
+      if (f.dgIndex === null && (f.transitions||[]).length === 0)
+        issues.push({ sev:'warn', msg:`${loc}: State has no DecisionGraph and no transitions — it is inert (nothing will happen)`, idx: c.index });
+      // State not in SM states list
+      const sm = chunks[0];
+      if (sm?.fields?.states && !sm.fields.states.includes(c.index))
+        issues.push({ sev:'warn', msg:`${loc}: State #${c.index} is not in StateMachine.states list — unreachable`, idx: c.index });
+    }
+    // Random node with no choices
+    if (c.type === 0x02eedb70) {
+      if ((f.choices||[]).length === 0)
+        issues.push({ sev:'warn', msg:`${loc}: Random node has no choices — will never select anything`, idx: c.index });
+    }
+    // NextState pointing to itself
+    if (c.type === 0x02eeebdc) {
+      // NextState ref is valid but warn if it creates a trivial self-loop
+      if (f.stateIdx === null)
+        issues.push({ sev:'warn', msg:`${loc}: NextState has no target state — null transition`, idx: c.index });
     }
   });
 
