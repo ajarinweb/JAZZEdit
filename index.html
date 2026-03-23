@@ -526,6 +526,184 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+/* ─── SCRIPT VIEW MODE ───────────────────────────────────────── */
+/* In script mode: tree-panel shrinks to navigator, props-panel becomes editor */
+#workspace.script-mode #tree-panel {
+  width: 220px;
+  min-width: 160px;
+}
+#workspace.script-mode #props-panel {
+  display: none;
+}
+#script-editor-panel {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+#workspace.script-mode #script-editor-panel {
+  display: flex;
+}
+
+/* View toggle in tree header */
+#view-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-shrink: 0;
+}
+.view-btn {
+  flex: 1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text3);
+  letter-spacing: 0.3px;
+  transition: all 0.12s;
+  text-align: center;
+}
+.view-btn:hover { color: var(--text2); background: var(--bg2); }
+.view-btn.active {
+  background: var(--bg2);
+  color: var(--accent2);
+  border-color: var(--border);
+}
+
+/* Script editor toolbar */
+#script-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#script-toolbar .st-label {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  flex: 1;
+}
+.st-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--bg3);
+  color: var(--text2);
+  transition: all 0.12s;
+}
+.st-btn:hover { color: var(--text); border-color: var(--accent2); }
+.st-btn.accent { color: var(--accent3); border-color: rgba(105,255,180,0.3); background: rgba(105,255,180,0.06); }
+.st-btn.accent:hover { background: rgba(105,255,180,0.14); }
+
+/* The script content area */
+#script-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+}
+
+/* Line numbers gutter */
+#script-gutter {
+  width: 48px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+  padding-top: 12px;
+  user-select: none;
+}
+.gutter-line {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text3);
+  text-align: right;
+  padding-right: 10px;
+}
+
+/* Actual editor textarea (invisible, for input) + rendered highlight layer */
+#script-textarea {
+  position: absolute;
+  inset: 0;
+  left: 48px;
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: transparent;
+  caret-color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  z-index: 2;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+  spellcheck: false;
+}
+#script-highlight {
+  position: absolute;
+  inset: 0;
+  left: 48px;
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  color: var(--text2);
+}
+
+/* Syntax tokens */
+.sk { color: var(--accent2); font-weight: 600; }   /* keyword */
+.sn { color: var(--accent3); }                       /* name/string */
+.sh { color: var(--warn); }                          /* hash */
+.sr { color: var(--accent); }                        /* ref/index */
+.sc { color: var(--text3); font-style: italic; }    /* comment */
+.sp { color: var(--actor-color); }                   /* property */
+
+/* Highlighted chunk (from tree click) */
+.script-chunk-line {
+  display: block;
+  transition: background 0.2s;
+}
+.script-chunk-line.highlighted {
+  background: rgba(124,131,253,0.12);
+  border-left: 2px solid var(--accent2);
+  margin-left: -2px;
+}
+
+/* Navigator tree (compact in script mode) */
+#workspace.script-mode .tree-item {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+#workspace.script-mode .tl-type {
+  display: none;
+}
+
+
 /* ─── NAME DISPLAY — subtitle style ──────────────────────────── */
 /* Wrapper: stacks the input + subtitle vertically */
 .prop-input-wrap {
@@ -909,6 +1087,11 @@ body {
 
   <!-- TREE PANEL -->
   <div id="tree-panel">
+    <!-- View toggle -->
+    <div id="view-toggle">
+      <button class="view-btn active" id="btnViewTree"  title="Tree / Properties view">⊞ Tree</button>
+      <button class="view-btn"        id="btnViewScript" title="Script editor view">✎ Script</button>
+    </div>
     <div id="tree-header">Structure</div>
     <div id="tree-body">
       <div class="drop-zone" id="dropZone">
@@ -925,6 +1108,21 @@ body {
       <div class="es-icon">🎵</div>
       <div class="es-title">No File Loaded</div>
       <div class="es-sub">Open a .jazz file to begin editing</div>
+    </div>
+  </div>
+
+  <!-- SCRIPT EDITOR PANEL -->
+  <div id="script-editor-panel">
+    <div id="script-toolbar">
+      <span class="st-label">✎ Script Editor</span>
+      <button class="st-btn" id="scriptBtnRefresh" title="Re-generate script from current data">↻ Refresh</button>
+      <button class="st-btn" id="scriptBtnWrap" title="Toggle word wrap">⇌ Wrap</button>
+      <button class="st-btn accent" id="scriptBtnCopy" title="Copy all to clipboard">📋 Copy</button>
+    </div>
+    <div id="script-content">
+      <div id="script-gutter"></div>
+      <div id="script-highlight"></div>
+      <textarea id="script-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
     </div>
   </div>
 
@@ -5319,6 +5517,372 @@ function tryGuessNames(chunks) {
   }
   return guessed;
 }
+
+
+// ═══════════════════════════════════════════════════════
+// SCRIPT VIEW ENGINE
+// ═══════════════════════════════════════════════════════
+
+let scriptMode = false;
+let scriptWrap = false;
+// Map: chunkIdx → {startLine, endLine}
+const scriptLineMap = new Map();
+
+// ── Syntax token helpers ──────────────────────────────
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+const skw = s => `<span class="sk">${esc(s)}</span>`;
+const sna = s => `<span class="sn">${esc(s)}</span>`;
+const shx = s => `<span class="sh">${esc(s)}</span>`;
+const srf = s => `<span class="sr">${esc(s)}</span>`;
+const scm = s => `<span class="sc">// ${esc(s)}</span>`;
+const spr = s => `<span class="sp">${esc(s)}</span>`;
+
+// ── Build script with line map ────────────────────────
+function buildScriptWithMap() {
+  if (!state.jazz) return { lines: [], lineMap: new Map() };
+  const chunks = state.jazz.chunks;
+  const lineMap = new Map();
+  const out = [];  // array of {text, chunkIdx}
+
+  function line(text, chunkIdx = null) {
+    out.push({ text, chunkIdx });
+  }
+
+  function resolveHash(h) {
+    const name = lookupName(h);
+    if (name) return `${shx(h8(h))} ${scm(name)}`;
+    return shx(h8(h));
+  }
+  function resolve64(lo, hi) {
+    const name = lookupName64(lo, hi);
+    const hexStr = h64(lo, hi);
+    if (name) return `${shx(hexStr)} ${scm(name)}`;
+    return shx(hexStr);
+  }
+
+  function fmtAction(idx, depth, seen) {
+    if (idx === null) return;
+    const c = chunks[idx];
+    if (!c?.fields) return;
+    if (seen.has(idx)) {
+      line('  '.repeat(depth) + scm(`→ ${c.typeName} #${idx} (see above)`), idx);
+      return;
+    }
+    seen.add(idx);
+    const f = c.fields;
+    const ind = '  '.repeat(depth);
+
+    if (c.type === 0x02eedb5f) {  // Play
+      const clipStr = f.strData
+        ? `${skw('Play')} ${sna('"'+f.strData+'"')}`
+        : `${skw('Play')} ${resolve64(f.clip.instance.lo, f.clip.instance.hi)}`;
+      const actorStr = f.actorIdx !== null && chunks[f.actorIdx]?.fields
+        ? ` ${skw('for')} ${resolveHash(chunks[f.actorIdx].fields.parameterName)}`
+        : '';
+      line(ind + clipStr + actorStr, idx);
+      if (f.clip.instance.lo === 0 && f.clip.instance.hi === 0 && !f.strData)
+        line(ind + scm('  ⛔ WARNING: NULL clip — sim will freeze!'), idx);
+      (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
+
+    } else if (c.type === 0x0344d438) {  // Stop
+      const actorStr = f.actorIdx !== null && chunks[f.actorIdx]?.fields
+        ? ` ${skw('for')} ${resolveHash(chunks[f.actorIdx].fields.parameterName)}`
+        : '';
+      line(ind + skw('Stop Animation') + actorStr, idx);
+      (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
+
+    } else if (c.type === 0x02eedb70) {  // Random
+      line(ind + skw('Select Random'), idx);
+      (f.choices||[]).forEach((ch, ci) => {
+        line(ind + `  ${spr('Weight')} ${shx(ch.weight.toFixed(3))} {`, idx);
+        (ch.actions||[]).forEach(i => fmtAction(i, depth+2, seen));
+        line(ind + '  }', idx);
+      });
+      (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
+
+    } else if (c.type === 0x02eeebdc) {  // NextState
+      const tgt = f.stateIdx !== null ? chunks[f.stateIdx] : null;
+      const tgtStr = tgt?.fields ? resolveHash(tgt.fields.stateName) : srf(`#${f.stateIdx}`);
+      line(ind + `${skw('Next State')} ${tgtStr}`, idx);
+
+    } else if (c.type === 0x02eeebdd) {  // Prop
+      const cr = f.catalogRef ? resolve64(f.catalogRef.instance.lo, f.catalogRef.instance.hi) : shx('?');
+      const actorStr = f.actorIdx !== null && chunks[f.actorIdx]?.fields
+        ? resolveHash(chunks[f.actorIdx].fields.parameterName)
+        : srf(`#${f.actorIdx}`);
+      line(ind + `${skw('Create Prop')} ${cr} ${skw('as')} ${actorStr}`, idx);
+      (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
+
+    } else if (c.type === 0x02eedb92) {  // SelectOnParameter
+      const param = f.paramIdx !== null && chunks[f.paramIdx]?.fields
+        ? resolveHash(chunks[f.paramIdx].fields.paramName)
+        : srf(`#${f.paramIdx}`);
+      line(ind + `${skw('Select on Parameter')} ${param}`, idx);
+      (f.cases||[]).forEach(cas => {
+        line(ind + `  ${spr('Value')} ${shx(h8(cas.value))} {`, idx);
+        (cas.actions||[]).forEach(i => fmtAction(i, depth+2, seen));
+        line(ind + '  }', idx);
+      });
+
+    } else if (c.type === 0x02eeebde) {  // ActorOperation
+      const actor = f.actorIdx !== null && chunks[f.actorIdx]?.fields
+        ? resolveHash(chunks[f.actorIdx].fields.parameterName)
+        : srf(`#${f.actorIdx}`);
+      const ops = (f.operations||[]).map(o => shx(h8(o))).join(', ');
+      line(ind + `${skw('Actor Operation')} ${ops} ${skw('on')} ${actor}`, idx);
+      (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
+    } else {
+      line(ind + scm(`${c.typeName} #${idx}`), idx);
+    }
+  }
+
+  function fmtDG(dgIdx, depth) {
+    const dg = chunks[dgIdx];
+    if (!dg?.fields) return;
+    const f = dg.fields;
+    const ind = '  '.repeat(depth);
+    const seen = new Set();
+    const startLine = out.length;
+    line(ind + skw('Decision Graph') + ` ${scm(`#${dgIdx} — ${f.graphRoot.length} entry point(s), ${f.allNodes.length} node(s)`)}`, dgIdx);
+    line(ind + '{', dgIdx);
+    if (f.graphRoot.length === 0) {
+      line(ind + '  ' + scm('(empty — no entry points)'), dgIdx);
+    } else {
+      f.graphRoot.forEach(i => fmtAction(i, depth+1, seen));
+    }
+    line(ind + '}', dgIdx);
+    lineMap.set(dgIdx, { start: startLine, end: out.length - 1 });
+  }
+
+  function fmtState(stIdx) {
+    const c = chunks[stIdx];
+    if (!c?.fields) return;
+    const f = c.fields;
+    const startLine = out.length;
+    const nameStr = resolveHash(f.stateName);
+
+    line('', stIdx);
+    line(`${skw('State')} ${nameStr} {`, stIdx);
+
+    // Properties
+    const props = [];
+    if (f.stateProperties & 0x01) props.push('Loop');
+    if (f.stateProperties & 0x02) props.push('Persistent');
+    if (f.stateProperties & 0x04) props.push('Entry');
+    if (f.stateProperties & 0x08) props.push('Exit');
+    if (props.length)
+      line(`  ${spr('Properties')} ${sna(props.join(' | '))}`, stIdx);
+
+    // Transitions
+    (f.transitions||[]).forEach(ti => {
+      const tc = chunks[ti];
+      if (tc?.fields) {
+        line(`  ${skw('Transitions to')} ${resolveHash(tc.fields.stateName)}`, stIdx);
+      }
+    });
+
+    // Decision Graph
+    if (f.dgIndex !== null) {
+      fmtDG(f.dgIndex, 1);
+    } else {
+      line(`  ${scm('(no decision graph)')}`, stIdx);
+    }
+
+    line('}', stIdx);
+    lineMap.set(stIdx, { start: startLine, end: out.length - 1 });
+  }
+
+  // ── Top-level: StateMachine ───────────────────────────
+  const sm = chunks[0];
+  if (!sm?.fields) return { lines: out, lineMap };
+  const f = sm.fields;
+
+  lineMap.set(0, { start: 0, end: 0 });
+  line(`${skw('State Machine')} ${resolveHash(f.name)} {`, 0);
+  line(`  ${scm('Instance: ' + h64(sm.instance.lo, sm.instance.hi))}`, 0);
+  line(`  ${scm('Priority: ' + f.priority + '  Properties: ' + h8(f.properties))}`, 0);
+
+  // Actor definitions
+  if ((f.actorDefs||[]).length > 0) {
+    line('', null);
+    line(`  ${scm('─── Actors ───')}`, null);
+    f.actorDefs.forEach(ai => {
+      const ac = chunks[ai];
+      if (!ac?.fields) return;
+      const s = ac.fields.defaultValue !== 0
+        ? `  ${skw('Actor')} ${resolveHash(ac.fields.parameterName)} = ${shx(h8(ac.fields.defaultValue))}`
+        : `  ${skw('Actor')} ${resolveHash(ac.fields.parameterName)}`;
+      const start = out.length;
+      line(s, ai);
+      lineMap.set(ai, { start, end: out.length - 1 });
+    });
+  }
+
+  // Parameter definitions
+  if ((f.paramDefs||[]).length > 0) {
+    line('', null);
+    line(`  ${scm('─── Parameters ───')}`, null);
+    f.paramDefs.forEach(pi => {
+      const pc = chunks[pi];
+      if (!pc?.fields) return;
+      const s = pc.fields.defaultValue !== 0
+        ? `  ${skw('Parameter')} ${resolveHash(pc.fields.paramName)} = ${shx(h8(pc.fields.defaultValue))}`
+        : `  ${skw('Parameter')} ${resolveHash(pc.fields.paramName)}`;
+      const start = out.length;
+      line(s, pi);
+      lineMap.set(pi, { start, end: out.length - 1 });
+    });
+  }
+
+  // States
+  line('', null);
+  line(`  ${scm('─── States ───')}`, null);
+  (f.states||[]).forEach(si => fmtState(si));
+
+  line('', null);
+  line('}', 0);
+  lineMap.set(0, { start: 0, end: out.length - 1 });
+
+  return { lines: out, lineMap };
+}
+
+// ── Render script to highlight div ───────────────────
+let _scriptData = null;
+
+function renderScript() {
+  const { lines, lineMap } = buildScriptWithMap();
+  _scriptData = { lines, lineMap };
+
+  // Update global lineMap
+  scriptLineMap.clear();
+  lineMap.forEach((v, k) => scriptLineMap.set(k, v));
+
+  // Build highlighted HTML
+  const htmlLines = lines.map(({ text, chunkIdx }) => {
+    const dataAttr = chunkIdx !== null ? ` data-chunk="${chunkIdx}"` : '';
+    return `<span class="script-chunk-line"${dataAttr}>${text || ' '}</span>`;
+  });
+  document.getElementById('script-highlight').innerHTML = htmlLines.join('\n');
+
+  // Plain text for textarea
+  const plain = lines.map(l => l.text.replace(/<[^>]+>/g, '')).join('\n');
+  document.getElementById('script-textarea').value = plain;
+
+  // Gutter
+  const gutter = document.getElementById('script-gutter');
+  gutter.innerHTML = lines.map((_, i) =>
+    `<div class="gutter-line">${i+1}</div>`
+  ).join('');
+
+  syncScroll();
+}
+
+// ── Sync scroll between textarea and highlight ────────
+function syncScroll() {
+  const ta = document.getElementById('script-textarea');
+  const hl = document.getElementById('script-highlight');
+  const gu = document.getElementById('script-gutter');
+  if (!ta || !hl) return;
+  hl.scrollTop  = ta.scrollTop;
+  hl.scrollLeft = ta.scrollLeft;
+  gu.scrollTop  = ta.scrollTop;
+}
+
+// ── Navigate from tree click to script line ───────────
+function scrollScriptToChunk(chunkIdx) {
+  const range = scriptLineMap.get(chunkIdx);
+  if (!range) return;
+
+  // Remove previous highlights
+  document.querySelectorAll('.script-chunk-line.highlighted')
+    .forEach(el => el.classList.remove('highlighted'));
+
+  // Highlight matching lines
+  document.querySelectorAll(`.script-chunk-line[data-chunk="${chunkIdx}"]`)
+    .forEach(el => el.classList.add('highlighted'));
+
+  // Scroll textarea to line
+  const ta = document.getElementById('script-textarea');
+  if (!ta) return;
+  const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+  const targetY = range.start * lineHeight;
+  ta.scrollTop = Math.max(0, targetY - 80);
+  syncScroll();
+}
+
+// ── View mode switching ───────────────────────────────
+function setViewMode(mode) {
+  scriptMode = (mode === 'script');
+  const ws = document.getElementById('workspace');
+  const treeHeader = document.getElementById('tree-header');
+
+  if (scriptMode) {
+    ws.classList.add('script-mode');
+    treeHeader.textContent = 'Navigator';
+    document.getElementById('btnViewScript').classList.add('active');
+    document.getElementById('btnViewTree').classList.remove('active');
+    renderScript();
+  } else {
+    ws.classList.remove('script-mode');
+    treeHeader.textContent = 'Structure';
+    document.getElementById('btnViewTree').classList.add('active');
+    document.getElementById('btnViewScript').classList.remove('active');
+  }
+}
+
+// ── Wire up tree click in script mode ────────────────
+// Patch buildTreeItem to also scroll script when in script mode
+const _origBuildTreeItem = buildTreeItem;
+// We'll intercept via event delegation on tree-body
+
+document.getElementById('tree-body').addEventListener('click', e => {
+  if (!scriptMode) return;
+  const item = e.target.closest('.tree-item');
+  if (!item) return;
+  const idx = parseInt(item.dataset.idx);
+  if (!isNaN(idx)) scrollScriptToChunk(idx);
+}, true);  // capture phase so it fires before the existing handler
+
+// ── Script toolbar buttons ────────────────────────────
+document.getElementById('scriptBtnRefresh').addEventListener('click', () => {
+  renderScript();
+  notify('Script refreshed');
+});
+
+document.getElementById('scriptBtnWrap').addEventListener('click', () => {
+  scriptWrap = !scriptWrap;
+  const ta = document.getElementById('script-textarea');
+  const hl = document.getElementById('script-highlight');
+  ta.style.whiteSpace = scriptWrap ? 'pre-wrap' : 'pre';
+  hl.style.whiteSpace  = scriptWrap ? 'pre-wrap' : 'pre';
+  document.getElementById('scriptBtnWrap').classList.toggle('active', scriptWrap);
+});
+
+document.getElementById('scriptBtnCopy').addEventListener('click', () => {
+  const ta = document.getElementById('script-textarea');
+  navigator.clipboard?.writeText(ta.value);
+  notify('Script copied to clipboard');
+});
+
+// Sync scroll
+document.getElementById('script-textarea').addEventListener('scroll', syncScroll);
+
+// ── View toggle buttons ───────────────────────────────
+document.getElementById('btnViewTree').addEventListener('click', () => setViewMode('tree'));
+document.getElementById('btnViewScript').addEventListener('click', () => {
+  setViewMode('script');
+});
+
+// ── Re-render script when file changes ───────────────
+// (called from renderTree)
+const _origRenderTree = renderTree;
+window.renderTree = function() {
+  _origRenderTree();
+  if (scriptMode && state.jazz) renderScript();
+};
 
 // Init
 setupDropZone();
