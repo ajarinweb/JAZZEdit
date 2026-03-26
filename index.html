@@ -613,95 +613,110 @@ body {
 .st-btn.accent:hover { background: rgba(105,255,180,0.14); }
 
 /* The script content area */
+/* ─── SCRIPT EDITOR ──────────────────────────────────────────── */
 #script-content {
   flex: 1;
+  display: flex;
   overflow: hidden;
   position: relative;
-  display: flex;
 }
 
-/* Line numbers gutter */
+/* Gutter */
 #script-gutter {
-  width: 48px;
+  width: 52px;
+  min-width: 52px;
   background: var(--bg2);
   border-right: 1px solid var(--border);
   overflow: hidden;
   flex-shrink: 0;
-  padding-top: 12px;
   user-select: none;
+  pointer-events: none;
+}
+#script-gutter-inner {
+  padding: 12px 0;
+  will-change: transform;
 }
 .gutter-line {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 20.4px; /* 12px * 1.7 */
   color: var(--text3);
   text-align: right;
   padding-right: 10px;
+  white-space: nowrap;
 }
+.gutter-line.hl { color: var(--accent2); font-weight: 700; }
 
-/* Actual editor textarea (invisible, for input) + rendered highlight layer */
+/* Real textarea — the actual editor */
 #script-textarea {
-  position: absolute;
-  inset: 0;
-  left: 48px;
-  padding: 12px 16px;
+  flex: 1;
+  padding: 12px 24px 48px 16px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  line-height: 1.7;
-  color: transparent;
-  caret-color: var(--text);
-  background: transparent;
+  line-height: 20.4px; /* must match gutter exactly */
+  background: var(--bg);
+  color: var(--text2);
   border: none;
   outline: none;
   resize: none;
-  z-index: 2;
   tab-size: 2;
   white-space: pre;
   overflow: auto;
+  caret-color: var(--accent);
   spellcheck: false;
 }
-#script-highlight {
-  position: absolute;
-  inset: 0;
-  left: 48px;
-  padding: 12px 16px;
+#script-textarea:focus { background: var(--bg); }
+#script-textarea.wrap { white-space: pre-wrap; }
+/* Selection highlight */
+#script-textarea::selection { background: rgba(124,131,253,0.3); }
+
+/* Status bar at bottom */
+#script-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 12px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  line-height: 1.7;
-  white-space: pre;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 1;
-  color: var(--text2);
+  font-size: 10px;
+  color: var(--text3);
+  flex-shrink: 0;
 }
+#script-status .ss-modified { color: var(--warn); }
+#script-status .ss-ok       { color: var(--accent3); }
+#script-status .ss-err      { color: var(--error); }
 
-/* Syntax tokens */
-.sk { color: var(--accent2); font-weight: 600; }   /* keyword */
-.sn { color: var(--accent3); }                       /* name/string */
-.sh { color: var(--warn); }                          /* hash */
-.sr { color: var(--accent); }                        /* ref/index */
-.sc { color: var(--text3); font-style: italic; }    /* comment */
-.sp { color: var(--actor-color); }                   /* property */
-
-/* Highlighted chunk (from tree click) */
-.script-chunk-line {
-  display: block;
-  transition: background 0.2s;
-}
-.script-chunk-line.highlighted {
-  background: rgba(124,131,253,0.12);
-  border-left: 2px solid var(--accent2);
-  margin-left: -2px;
-}
-
-/* Navigator tree (compact in script mode) */
-#workspace.script-mode .tree-item {
-  padding: 2px 6px;
-  font-size: 12px;
-}
-#workspace.script-mode .tl-type {
+/* Find bar (Ctrl+F) */
+#script-findbar {
   display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
+#script-findbar.active { display: flex; }
+#script-find-inp {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text); padding: 3px 8px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; outline: none;
+  width: 200px;
+}
+#script-find-inp:focus { border-color: var(--accent2); }
+.sf-btn {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border);
+  cursor: pointer; background: var(--bg3); color: var(--text2);
+  transition: all 0.1s;
+}
+.sf-btn:hover { color: var(--text); border-color: var(--accent2); }
+#script-find-count { color: var(--text3); font-size: 10px; min-width: 60px; }
+
+/* Navigator compact */
+#workspace.script-mode .tree-item { padding: 2px 6px; font-size: 12px; }
+#workspace.script-mode .tl-type   { display: none; }
 
 
 /* ─── NAME DISPLAY — subtitle style ──────────────────────────── */
@@ -1115,14 +1130,27 @@ body {
   <div id="script-editor-panel">
     <div id="script-toolbar">
       <span class="st-label">✎ Script Editor</span>
-      <button class="st-btn" id="scriptBtnRefresh" title="Re-generate script from current data">↻ Refresh</button>
+      <button class="st-btn" id="scriptBtnRefresh" title="Regenerate from model (discard edits)">↻ Refresh</button>
       <button class="st-btn" id="scriptBtnWrap" title="Toggle word wrap">⇌ Wrap</button>
-      <button class="st-btn accent" id="scriptBtnCopy" title="Copy all to clipboard">📋 Copy</button>
+      <button class="st-btn" id="scriptBtnFind" title="Find in script (Ctrl+F)">⌕ Find</button>
+      <button class="st-btn accent" id="scriptBtnCopy" title="Copy all">📋 Copy</button>
+    </div>
+    <div id="script-findbar">
+      <input id="script-find-inp" type="text" placeholder="Find…" autocomplete="off">
+      <button class="sf-btn" id="sfBtnPrev">▲</button>
+      <button class="sf-btn" id="sfBtnNext">▼</button>
+      <span id="script-find-count"></span>
+      <button class="sf-btn" id="sfBtnClose" style="margin-left:auto">✕</button>
     </div>
     <div id="script-content">
-      <div id="script-gutter"></div>
-      <div id="script-highlight"></div>
+      <div id="script-gutter"><div id="script-gutter-inner"></div></div>
       <textarea id="script-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    </div>
+    <div id="script-status">
+      <span id="ss-pos">Ln 1, Col 1</span>
+      <span id="ss-state"></span>
+      <span style="flex:1"></span>
+      <span id="ss-hint" style="color:var(--text3)">Ctrl+Z undo · Ctrl+F find · edits auto-apply after 800ms</span>
     </div>
   </div>
 
@@ -5752,137 +5780,457 @@ function buildScriptWithMap() {
 // ── Render script to highlight div ───────────────────
 let _scriptData = null;
 
+
+// ═══════════════════════════════════════════════════════
+// SCRIPT EDITOR — full editable mode
+// ═══════════════════════════════════════════════════════
+
+let _scriptDirty    = false;
+let _scriptApplyTimer = null;
+let _findMatches    = [];
+let _findCurrent    = -1;
+
+// ── Gutter sync ───────────────────────────────────────
+function syncGutter() {
+  const ta = document.getElementById('script-textarea');
+  const gi = document.getElementById('script-gutter-inner');
+  if (!ta || !gi) return;
+  // Sync scroll offset
+  gi.style.transform = `translateY(-${ta.scrollTop}px)`;
+}
+
+function rebuildGutter(lineCount) {
+  const gi = document.getElementById('script-gutter-inner');
+  if (!gi) return;
+  gi.innerHTML = Array.from({length: lineCount}, (_, i) =>
+    `<div class="gutter-line" id="gl${i+1}">${i+1}</div>`
+  ).join('');
+}
+
+function highlightGutterLines(startLine, endLine) {
+  document.querySelectorAll('.gutter-line.hl').forEach(e => e.classList.remove('hl'));
+  for (let i = startLine; i <= endLine; i++) {
+    const el = document.getElementById(`gl${i}`);
+    if (el) el.classList.add('hl');
+  }
+}
+
+// ── Render script into textarea ───────────────────────
 function renderScript() {
   const { lines, lineMap } = buildScriptWithMap();
   _scriptData = { lines, lineMap };
 
-  // Update global lineMap
   scriptLineMap.clear();
   lineMap.forEach((v, k) => scriptLineMap.set(k, v));
 
-  // Build highlighted HTML
-  const htmlLines = lines.map(({ text, chunkIdx }) => {
-    const dataAttr = chunkIdx !== null ? ` data-chunk="${chunkIdx}"` : '';
-    return `<span class="script-chunk-line"${dataAttr}>${text || ' '}</span>`;
-  });
-  document.getElementById('script-highlight').innerHTML = htmlLines.join('\n');
-
-  // Plain text for textarea
+  // Build plain text (no HTML)
   const plain = lines.map(l => l.text.replace(/<[^>]+>/g, '')).join('\n');
-  document.getElementById('script-textarea').value = plain;
-
-  // Gutter
-  const gutter = document.getElementById('script-gutter');
-  gutter.innerHTML = lines.map((_, i) =>
-    `<div class="gutter-line">${i+1}</div>`
-  ).join('');
-
-  syncScroll();
-}
-
-// ── Sync scroll between textarea and highlight ────────
-function syncScroll() {
   const ta = document.getElementById('script-textarea');
-  const hl = document.getElementById('script-highlight');
-  const gu = document.getElementById('script-gutter');
-  if (!ta || !hl) return;
-  hl.scrollTop  = ta.scrollTop;
-  hl.scrollLeft = ta.scrollLeft;
-  gu.scrollTop  = ta.scrollTop;
+  if (!ta) return;
+  ta.value = plain;
+  _scriptDirty = false;
+  updateScriptStatus('✅ Up to date', 'ss-ok');
+  rebuildGutter(lines.length);
 }
 
-// ── Navigate from tree click to script line ───────────
+// ── Navigate tree → script ────────────────────────────
 function scrollScriptToChunk(chunkIdx) {
   const range = scriptLineMap.get(chunkIdx);
   if (!range) return;
-
-  // Remove previous highlights
-  document.querySelectorAll('.script-chunk-line.highlighted')
-    .forEach(el => el.classList.remove('highlighted'));
-
-  // Highlight matching lines
-  document.querySelectorAll(`.script-chunk-line[data-chunk="${chunkIdx}"]`)
-    .forEach(el => el.classList.add('highlighted'));
-
-  // Scroll textarea to line
   const ta = document.getElementById('script-textarea');
   if (!ta) return;
-  const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-  const targetY = range.start * lineHeight;
-  ta.scrollTop = Math.max(0, targetY - 80);
-  syncScroll();
+  const lh = 20.4; // line-height px
+  const targetTop = Math.max(0, range.start * lh - 80);
+  ta.scrollTop = targetTop;
+  syncGutter();
+  highlightGutterLines(range.start + 1, range.end + 1);
+  // Move cursor to that line
+  const lines = ta.value.split('\n');
+  const charPos = lines.slice(0, range.start).join('\n').length + (range.start > 0 ? 1 : 0);
+  ta.focus();
+  ta.setSelectionRange(charPos, charPos + lines[range.start].length);
 }
 
-// ── View mode switching ───────────────────────────────
+// ── Status bar ────────────────────────────────────────
+function updateScriptStatus(msg, cls) {
+  const el = document.getElementById('ss-state');
+  if (!el) return;
+  el.className = cls || '';
+  el.textContent = msg;
+}
+
+// ── Cursor position tracker ───────────────────────────
+function updateCursorPos() {
+  const ta = document.getElementById('script-textarea');
+  const pos = document.getElementById('ss-pos');
+  if (!ta || !pos) return;
+  const val = ta.value;
+  const before = val.substring(0, ta.selectionStart);
+  const ln  = before.split('\n').length;
+  const col = before.split('\n').pop().length + 1;
+  pos.textContent = `Ln ${ln}, Col ${col}`;
+}
+
+// ════════════════════════════════════════════════════════
+// SCRIPT PARSER — reads textarea text, diffs vs model
+// ════════════════════════════════════════════════════════
+function applyScriptEdits(text) {
+  if (!state.jazz) return;
+  const chunks = state.jazz.chunks;
+  const lines  = text.split('\n');
+
+  // We use lineMap to correlate text lines → chunks
+  // Strategy: for each chunk we know, re-parse its lines
+  let changeCount = 0;
+
+  scriptLineMap.forEach((range, chunkIdx) => {
+    const chunk = chunks[chunkIdx];
+    if (!chunk?.fields) return;
+    const f = chunk.fields;
+    const chunkLines = lines.slice(range.start, range.end + 1);
+
+    let changed = false;
+
+    if (chunk.type === 0x02d5df13) {
+      // State Machine: "State Machine 0xHASH {"
+      const m = chunkLines[0]?.match(/State Machine\s+(0x[0-9a-fA-F]{8})/i);
+      if (m) {
+        const n = parseHex(m[1]);
+        if (n !== null && n !== f.name) { pushUndo('Script edit: SM name'); f.name = n; changed = true; }
+      }
+      // Priority: "// Priority: NNN"
+      for (const l of chunkLines) {
+        const pm = l.match(/Priority:\s*(\d+)/i);
+        if (pm) {
+          const n = parseInt(pm[1]);
+          if (!isNaN(n) && n !== f.priority) { f.priority = n; changed = true; }
+        }
+      }
+    }
+
+    if (chunk.type === 0x02eedafe) {
+      // State: "State 0xHASH {"
+      const m = chunkLines[0]?.match(/^State\s+(0x[0-9a-fA-F]{8})/i);
+      if (m) {
+        const n = parseHex(m[1]);
+        if (n !== null && n !== f.stateName) { pushUndo('Script edit: state name'); f.stateName = n; changed = true; }
+      }
+      // Properties: "Properties Loop | Exit | ..."
+      for (const l of chunkLines) {
+        const pm = l.match(/^\s*Properties\s+(.+)/i);
+        if (pm) {
+          let flags = 0;
+          const parts = pm[1].toUpperCase();
+          if (parts.includes('LOOP'))       flags |= 0x01;
+          if (parts.includes('PERSISTENT')) flags |= 0x02;
+          if (parts.includes('ENTRY'))      flags |= 0x04;
+          if (parts.includes('EXIT'))       flags |= 0x08;
+          if (flags !== f.stateProperties) { f.stateProperties = flags; changed = true; }
+        }
+      }
+    }
+
+    if (chunk.type === 0x02eedb2f) {
+      // ActorDef: "Actor 0xHASH" or "Actor 0xHASH = 0xDEFAULT"
+      const m = chunkLines[0]?.match(/^Actor\s+(0x[0-9a-fA-F]{8})(?:\s+=\s+(0x[0-9a-fA-F]{8}))?/i);
+      if (m) {
+        const n = parseHex(m[1]);
+        if (n !== null && n !== f.parameterName) { pushUndo('Script edit: actor'); f.parameterName = n; changed = true; }
+        if (m[2]) {
+          const d = parseHex(m[2]);
+          if (d !== null && d !== f.defaultValue) { f.defaultValue = d; changed = true; }
+        }
+      }
+    }
+
+    if (chunk.type === 0x02eedb46) {
+      // ParameterDef: "Parameter 0xHASH" or "Parameter 0xHASH = 0xDEFAULT"
+      const m = chunkLines[0]?.match(/^Parameter\s+(0x[0-9a-fA-F]{8})(?:\s+=\s+(0x[0-9a-fA-F]{8}))?/i);
+      if (m) {
+        const n = parseHex(m[1]);
+        if (n !== null && n !== f.paramName) { pushUndo('Script edit: parameter'); f.paramName = n; changed = true; }
+        if (m[2]) {
+          const d = parseHex(m[2]);
+          if (d !== null && d !== f.defaultValue) { f.defaultValue = d; changed = true; }
+        }
+      }
+    }
+
+    if (chunk.type === 0x02eedb5f) {
+      // PlayAnimation: "Play 0xHASH64 for 0xHASH" or "Play "name""
+      for (const l of chunkLines) {
+        // Play with 64-bit hash
+        const mPlay = l.match(/^\s*Play\s+(0x[0-9a-fA-F]{16})/i);
+        if (mPlay) {
+          const s = mPlay[1].replace(/^0x/i,'').padStart(16,'0');
+          const hi = parseInt(s.slice(0,8),16) >>> 0;
+          const lo = parseInt(s.slice(8,16),16) >>> 0;
+          if (lo !== f.clip.instance.lo || hi !== f.clip.instance.hi) {
+            pushUndo('Script edit: clip');
+            f.clip.instance.lo = lo; f.clip.instance.hi = hi;
+            changed = true;
+          }
+          break;
+        }
+        // Play "substitution" string
+        const mSub = l.match(/^\s*Play\s+"([^"]+)"/i);
+        if (mSub && mSub[1] !== f.strData) {
+          pushUndo('Script edit: clip substitution');
+          f.strData = mSub[1];
+          changed = true;
+          break;
+        }
+      }
+    }
+
+    if (chunk.type === 0x0344d438) {
+      // Stop — flags, priority editable
+      for (const l of chunkLines) {
+        const mf = l.match(/Flags\s+(0x[0-9a-fA-F]{8})/i);
+        if (mf) { const n=parseHex(mf[1]); if(n!==null && n!==f.flags){f.flags=n;changed=true;} }
+        const mp = l.match(/Priority\s+(\d+)/i);
+        if (mp) { const n=parseInt(mp[1]); if(!isNaN(n)&&n!==f.priority){f.priority=n;changed=true;} }
+      }
+    }
+
+    if (changed) {
+      chunk.modified = true;
+      changeCount++;
+    }
+  });
+
+  if (changeCount > 0) {
+    updateNameCountBadge();
+    // Re-render tree (reflects name changes) but NOT script (would interrupt typing)
+    renderTree();
+    if (state.selIdx !== null) renderProps();
+    updateScriptStatus(`✅ Applied ${changeCount} change(s)`, 'ss-ok');
+  } else {
+    updateScriptStatus('No changes detected', '');
+  }
+}
+
+// ── Find in script ────────────────────────────────────
+function scriptFindAll(query) {
+  const ta = document.getElementById('script-textarea');
+  if (!ta || !query) return [];
+  const text = ta.value;
+  const q = query.toLowerCase();
+  const results = [];
+  let pos = 0;
+  while (true) {
+    const idx = text.toLowerCase().indexOf(q, pos);
+    if (idx === -1) break;
+    results.push(idx);
+    pos = idx + 1;
+  }
+  return results;
+}
+
+function scriptFindNavigate(dir) {
+  const ta  = document.getElementById('script-textarea');
+  const cnt = document.getElementById('script-find-count');
+  if (!ta || !_findMatches.length) return;
+  _findCurrent = (_findCurrent + dir + _findMatches.length) % _findMatches.length;
+  const idx = _findMatches[_findCurrent];
+  const q   = document.getElementById('script-find-inp').value;
+  ta.focus();
+  ta.setSelectionRange(idx, idx + q.length);
+  // Scroll to selection
+  const lh = 20.4;
+  const before = ta.value.substring(0, idx);
+  const lineNo  = before.split('\n').length - 1;
+  ta.scrollTop = Math.max(0, lineNo * lh - 100);
+  syncGutter();
+  if (cnt) cnt.textContent = `${_findCurrent+1} / ${_findMatches.length}`;
+}
+
+function openScriptFind() {
+  const bar = document.getElementById('script-findbar');
+  bar.classList.add('active');
+  document.getElementById('script-find-inp').focus();
+  document.getElementById('script-find-inp').select();
+}
+function closeScriptFind() {
+  document.getElementById('script-findbar').classList.remove('active');
+  document.getElementById('script-textarea')?.focus();
+  _findMatches = []; _findCurrent = -1;
+}
+
+// ── Wire up events ────────────────────────────────────
+(function setupScriptEditor() {
+  const ta = document.getElementById('script-textarea');
+  if (!ta) return;
+
+  // Gutter sync on scroll
+  ta.addEventListener('scroll', syncGutter);
+
+  // Cursor position
+  ta.addEventListener('keyup',   updateCursorPos);
+  ta.addEventListener('mouseup', updateCursorPos);
+  ta.addEventListener('click',   updateCursorPos);
+
+  // Tab key → insert spaces
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = ta.selectionStart, end = ta.selectionEnd;
+      ta.value = ta.value.slice(0,s) + '  ' + ta.value.slice(end);
+      ta.selectionStart = ta.selectionEnd = s + 2;
+    }
+    // Ctrl+Z → our undo (not browser default)
+    if ((e.ctrlKey||e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      undo();
+      // Re-render script after undo
+      setTimeout(() => { renderScript(); }, 50);
+    }
+    if ((e.ctrlKey||e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+      e.preventDefault();
+      redo();
+      setTimeout(() => { renderScript(); }, 50);
+    }
+    // Ctrl+F → our find bar
+    if ((e.ctrlKey||e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      openScriptFind();
+    }
+  });
+
+  // Debounced parse & apply on input
+  ta.addEventListener('input', () => {
+    _scriptDirty = true;
+    updateScriptStatus('⟳ editing…', 'ss-modified');
+    clearTimeout(_scriptApplyTimer);
+    _scriptApplyTimer = setTimeout(() => {
+      applyScriptEdits(ta.value);
+      // Rebuild gutter if line count changed
+      const lineCount = ta.value.split('\n').length;
+      rebuildGutter(lineCount);
+    }, 800);
+  });
+
+  // Find bar
+  const findInp = document.getElementById('script-find-inp');
+  if (findInp) {
+    findInp.addEventListener('input', () => {
+      const q = findInp.value;
+      _findMatches = q ? scriptFindAll(q) : [];
+      _findCurrent = _findMatches.length > 0 ? 0 : -1;
+      const cnt = document.getElementById('script-find-count');
+      if (cnt) cnt.textContent = _findMatches.length > 0 ? `1 / ${_findMatches.length}` : 'No results';
+      if (_findMatches.length > 0) scriptFindNavigate(0);
+    });
+    findInp.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { scriptFindNavigate(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape') { closeScriptFind(); }
+    });
+  }
+  document.getElementById('sfBtnPrev')?.addEventListener('click', () => scriptFindNavigate(-1));
+  document.getElementById('sfBtnNext')?.addEventListener('click', () => scriptFindNavigate(1));
+  document.getElementById('sfBtnClose')?.addEventListener('click', closeScriptFind);
+
+  // Toolbar
+  document.getElementById('scriptBtnFind')?.addEventListener('click', openScriptFind);
+})();
+
+function renderScript() {
+  const { lines, lineMap } = buildScriptWithMap();
+  _scriptData = { lines, lineMap };
+  scriptLineMap.clear();
+  lineMap.forEach((v, k) => scriptLineMap.set(k, v));
+
+  const plain = lines.map(l => l.text.replace(/<[^>]+>/g, '')).join('\n');
+  const ta = document.getElementById('script-textarea');
+  if (!ta) return;
+  // Preserve scroll position if already rendered
+  const prevScroll = ta.scrollTop;
+  ta.value = plain;
+  ta.scrollTop = prevScroll;
+  _scriptDirty = false;
+  updateScriptStatus('✅ Up to date', 'ss-ok');
+  rebuildGutter(lines.length);
+  syncGutter();
+}
+
+function scrollScriptToChunk(chunkIdx) {
+  const range = scriptLineMap.get(chunkIdx);
+  if (!range) return;
+  const ta = document.getElementById('script-textarea');
+  if (!ta) return;
+  const lh = 20.4;
+  ta.scrollTop = Math.max(0, range.start * lh - 80);
+  syncGutter();
+  highlightGutterLines(range.start + 1, range.end + 1);
+  const lines = ta.value.split('\n');
+  const charPos = lines.slice(0, range.start).reduce((s,l) => s + l.length + 1, 0);
+  ta.focus();
+  ta.setSelectionRange(charPos, charPos + lines[range.start].length);
+  updateCursorPos();
+}
+
 function setViewMode(mode) {
   scriptMode = (mode === 'script');
   const ws = document.getElementById('workspace');
   const treeHeader = document.getElementById('tree-header');
-
   if (scriptMode) {
     ws.classList.add('script-mode');
     treeHeader.textContent = 'Navigator';
     document.getElementById('btnViewScript').classList.add('active');
     document.getElementById('btnViewTree').classList.remove('active');
     renderScript();
+    setTimeout(() => document.getElementById('script-textarea')?.focus(), 100);
   } else {
     ws.classList.remove('script-mode');
     treeHeader.textContent = 'Structure';
     document.getElementById('btnViewTree').classList.add('active');
     document.getElementById('btnViewScript').classList.remove('active');
+    // Flush any pending edits when switching away
+    if (_scriptDirty) {
+      clearTimeout(_scriptApplyTimer);
+      applyScriptEdits(document.getElementById('script-textarea').value);
+    }
   }
 }
 
-// ── Wire up tree click in script mode ────────────────
-// Patch buildTreeItem to also scroll script when in script mode
-const _origBuildTreeItem = buildTreeItem;
-// We'll intercept via event delegation on tree-body
-
+// ── Tree → scroll script on click ────────────────────
 document.getElementById('tree-body').addEventListener('click', e => {
   if (!scriptMode) return;
   const item = e.target.closest('.tree-item');
   if (!item) return;
   const idx = parseInt(item.dataset.idx);
   if (!isNaN(idx)) scrollScriptToChunk(idx);
-}, true);  // capture phase so it fires before the existing handler
+}, true);
 
-// ── Script toolbar buttons ────────────────────────────
+// ── Toolbar buttons ───────────────────────────────────
 document.getElementById('scriptBtnRefresh').addEventListener('click', () => {
   renderScript();
-  notify('Script refreshed');
+  notify('Script refreshed from model');
 });
-
 document.getElementById('scriptBtnWrap').addEventListener('click', () => {
   scriptWrap = !scriptWrap;
   const ta = document.getElementById('script-textarea');
-  const hl = document.getElementById('script-highlight');
-  ta.style.whiteSpace = scriptWrap ? 'pre-wrap' : 'pre';
-  hl.style.whiteSpace  = scriptWrap ? 'pre-wrap' : 'pre';
+  ta?.classList.toggle('wrap', scriptWrap);
   document.getElementById('scriptBtnWrap').classList.toggle('active', scriptWrap);
 });
-
 document.getElementById('scriptBtnCopy').addEventListener('click', () => {
   const ta = document.getElementById('script-textarea');
-  navigator.clipboard?.writeText(ta.value);
+  if (ta) navigator.clipboard?.writeText(ta.value);
   notify('Script copied to clipboard');
 });
 
-// Sync scroll
-document.getElementById('script-textarea').addEventListener('scroll', syncScroll);
-
-// ── View toggle buttons ───────────────────────────────
+// ── View toggle ───────────────────────────────────────
 document.getElementById('btnViewTree').addEventListener('click', () => setViewMode('tree'));
-document.getElementById('btnViewScript').addEventListener('click', () => {
-  setViewMode('script');
-});
+document.getElementById('btnViewScript').addEventListener('click', () => setViewMode('script'));
 
-// ── Re-render script when file changes ───────────────
-// (called from renderTree)
+// ── Re-render when data changes externally ────────────
+// Save original renderTree so we can call it from the wrapper
 const _origRenderTree = renderTree;
 window.renderTree = function() {
   _origRenderTree();
   if (scriptMode && state.jazz) renderScript();
 };
+
 
 // Init
 setupDropZone();
