@@ -6002,7 +6002,7 @@ function applyScriptEdits(text) {
   if (changeCount > 0) {
     updateNameCountBadge();
     // Re-render tree (reflects name changes) but NOT script (would interrupt typing)
-    renderTree();
+    window.renderTree(true); // <--- Lempar parameter 'true' ke sini
     if (state.selIdx !== null) renderProps();
     updateScriptStatus(`✅ Applied ${changeCount} change(s)`, 'ss-ok');
   } else {
@@ -6226,9 +6226,10 @@ document.getElementById('btnViewScript').addEventListener('click', () => setView
 // ── Re-render when data changes externally ────────────
 // Save original renderTree so we can call it from the wrapper
 const _origRenderTree = renderTree;
-window.renderTree = function() {
+window.renderTree = function(skipScriptUpdate = false) {
   _origRenderTree();
-  if (scriptMode && state.jazz) renderScript();
+  // Hanya render ulang script jika BUKAN dari auto-apply textarea
+  if (scriptMode && state.jazz && !skipScriptUpdate) renderScript();
 };
 
 
