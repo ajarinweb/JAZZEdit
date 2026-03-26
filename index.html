@@ -3045,14 +3045,14 @@ function updateAllRefsAfterDelete(deletedIdx) {
     c.modified = true; // ref indices changed → must re-serialize
     const f = c.fields;
 
-    // StateMachine — filter nulls so count is always accurate
+    // StateMachine
     if (f.actorDefs)   f.actorDefs   = nn(f.actorDefs);
     if (f.paramDefs)   f.paramDefs   = nn(f.paramDefs);
     if (f.states)      f.states      = nn(f.states);
     // State
     if ('dgIndex' in f)    f.dgIndex    = updateIdxRef(f.dgIndex, deletedIdx);
     if (f.transitions)     f.transitions = nn(f.transitions);
-    // DecisionGraph — filter nulls so allNodes/graphRoot count is accurate
+    // DecisionGraph
     if (f.allNodes)    f.allNodes    = nn(f.allNodes);
     if (f.graphRoot)   f.graphRoot   = nn(f.graphRoot);
     // Animation nodes
@@ -3065,6 +3065,14 @@ function updateAllRefsAfterDelete(deletedIdx) {
     // SelectOnParameter cases
     if (f.cases) f.cases.forEach(cas => { cas.actions = nn(cas.actions); });
   }
+
+  // ===== KODE TAMBAHAN FIX =====
+  // Sinkronisasi ulang urutan .index setiap chunk agar sama dengan posisi array-nya
+  chunks.forEach((c, idx) => {
+    c.index = idx;
+  });
+  // =============================
+
   // Update selIdx
   if (state.selIdx === deletedIdx) state.selIdx = null;
   else if (state.selIdx > deletedIdx) state.selIdx--;
