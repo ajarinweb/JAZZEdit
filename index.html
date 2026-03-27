@@ -5613,7 +5613,7 @@ function buildScriptWithMap() {
       const actorStr = f.actorIdx !== null && chunks[f.actorIdx]?.fields
         ? ` ${skw('for')} ${resolveHash(chunks[f.actorIdx].fields.parameterName)}`
         : '';
-      line(ind + clipStr + actorStr, idx);
+      line(ind + clipStr + actorStr + `  ${scm('// #' + idx)}`, idx);
       if (f.clip.instance.lo === 0 && f.clip.instance.hi === 0 && !f.strData)
         line(ind + scm('  ⛔ WARNING: NULL clip — sim will freeze!'), idx);
       (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
@@ -5622,7 +5622,7 @@ function buildScriptWithMap() {
       const actorStr = f.actorIdx !== null && chunks[f.actorIdx]?.fields
         ? ` ${skw('for')} ${resolveHash(chunks[f.actorIdx].fields.parameterName)}`
         : '';
-      line(ind + skw('Stop Animation') + actorStr, idx);
+      line(ind + skw('Stop Animation') + actorStr + `  ${scm('// #' + idx)}`, idx);
       (f.actions||[]).forEach(i => fmtAction(i, depth+1, seen));
 
     } else if (c.type === 0x02eedb70) {  // Random
@@ -5696,7 +5696,7 @@ function buildScriptWithMap() {
     const nameStr = resolveHash(f.stateName);
 
     line('', stIdx);
-    line(`${skw('State')} ${nameStr} {`, stIdx);
+    line(`${skw('State')} ${nameStr} {  ${scm('// #' + stIdx)}`, stIdx);
 
     // Properties
     const props = [];
@@ -5884,112 +5884,88 @@ function applyScriptEdits(text) {
   if (!sm || !sm.fields) return;
 
   let changeCount = 0;
+  let structuralChange = false;
+  const lines = text.split('\n');
 
-  // 1. UPDATE STATE MACHINE
-  const smMatch = text.match(/State Machine\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)/i);
-  if (smMatch) {
-      const hash = parseHex(smMatch[1]) ?? fnv32Lower(smMatch[1]);
-      if (sm.fields.name !== hash) { sm.fields.name = hash; sm.modified = true; changeCount++; }
+  // 1. KUMPULKAN SEMUA ID YANG MASIH ADA DI TEKS
+  const idsInText = new Set();
+  for (const l of lines) {
+    const idMatch = l.match(/\/\/\s*#(\d+)/);
+    if (idMatch) idsInText.add(parseInt(idMatch[1], 10));
   }
 
-  // 2. PARSING SEMUA STATE (Tambah, Hapus, Edit)
-  const textStates = [];
-  // Ambil semua blok State menggunakan Regex
-  const stateRegex = /State\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)\s*\{([\s\S]*?)(?=\n\s*State\s|\n\s*\}(?:\s*\}|$))/gi;
-  let sMatch;
-  while ((sMatch = stateRegex.exec(text)) !== null) {
-      textStates.push({
-          hash: parseHex(sMatch[1]) ?? fnv32Lower(sMatch[1]),
-          body: sMatch[2]
-      });
+  // 2. UPDATE VALUE / EDIT CLIP HASH (Berdasarkan ID)
+  for (const l of lines) {
+    const idMatch = l.match(/\/\/\s*#(\d+)/);
+    if (!idMatch) continue;
+    
+    const chunkIdx = parseInt(idMatch[1], 10);
+    const chunk = chunks[chunkIdx];
+    if (!chunk || !chunk.fields) continue;
+
+    const f = chunk.fields;
+    let changed = false;
+
+    if (chunk.type === 0x02eedb5f) { // Play Animation
+      const mPlay = l.match(/Play\s+(0x[0-9a-fA-F]{16})/i);
+      if (mPlay) {
+        const s = mPlay[1].replace(/^0x/i,'').padStart(16,'0');
+        const hi = parseInt(s.slice(0,8),16)>>>0, lo = parseInt(s.slice(8,16),16)>>>0;
+        if (lo !== f.clip.instance.lo || hi !== f.clip.instance.hi) {
+          f.clip.instance.lo = lo; f.clip.instance.hi = hi; f.strData = ''; changed = true;
+        }
+      }
+      const mSub = l.match(/Play\s+"([^"]+)"/i);
+      if (mSub && mSub[1] !== f.strData) { f.strData = mSub[1]; changed = true; }
+    }
+
+    if (changed) { chunk.modified = true; changeCount++; }
   }
 
-  if (textStates.length > 0) {
-      const newStateList = [];
-      
-      for (const ts of textStates) {
-          // Cari apakah state ini ada di memori
-          let existingIdx = sm.fields.states.find(idx => chunks[idx]?.fields?.stateName === ts.hash);
+  // 3. DETEKSI DELETE NODE DARI DECISION GRAPH
+  // Jika ID node hilang dari teks, basmi node tersebut dari DG!
+  for (let i = chunks.length - 1; i >= 1; i--) {
+    const dg = chunks[i];
+    if (dg && dg.type === 0x02eedb18 && dg.fields) { // DecisionGraph
+      const nodes = [...dg.fields.allNodes].reverse();
+      for (const nIdx of nodes) {
+        if (nIdx !== null && chunks[nIdx]) {
+          // Node aksi (Play, Stop, dll) yang kita pasangi KTP
+          const isAction = [0x02eedb5f, 0x0344d438, 0x02eedb70, 0x02eeebdd, 0x02eeebdc].includes(chunks[nIdx].type);
           
-          if (existingIdx !== undefined) {
-              // State SUDAH ADA, mari update propertinya
-              newStateList.push(existingIdx);
-              let chunk = chunks[existingIdx];
-              
-              // Update Properties (Loop, Exit, dll)
-              let pMatch = ts.body.match(/Properties\s+(.+)/i);
-              if (pMatch) {
-                  let flags = 0, pStr = pMatch[1].toUpperCase();
-                  if (pStr.includes('LOOP')) flags |= 0x01;
-                  if (pStr.includes('PERSISTENT')) flags |= 0x02;
-                  if (pStr.includes('ENTRY')) flags |= 0x04;
-                  if (pStr.includes('EXIT')) flags |= 0x08;
-                  if (flags !== chunk.fields.stateProperties) {
-                      chunk.fields.stateProperties = flags; chunk.modified = true; changeCount++;
-                  }
-              }
-              
-              // Update Edit Clip di Play Animation
-              if (chunk.fields.dgIndex !== null && chunks[chunk.fields.dgIndex]) {
-                  let dg = chunks[chunk.fields.dgIndex];
-                  let playNodesInMem = dg.fields.allNodes.filter(ni => chunks[ni] && chunks[ni].type === 0x02eedb5f);
-                  
-                  let playRegex = /Play\s+(0x[0-9a-fA-F]{16}|"([^"]+)")/gi;
-                  let textPlays = [];
-                  let pMatch;
-                  while ((pMatch = playRegex.exec(ts.body)) !== null) textPlays.push(pMatch[1]);
-                  
-                  for (let i = 0; i < Math.min(textPlays.length, playNodesInMem.length); i++) {
-                      let pChunk = chunks[playNodesInMem[i]];
-                      let val = textPlays[i];
-                      if (val.startsWith('"')) {
-                          let str = val.replace(/"/g, '');
-                          if (pChunk.fields.strData !== str) { pChunk.fields.strData = str; pChunk.modified = true; changeCount++; }
-                      } else {
-                          let s = val.replace(/^0x/i,'').padStart(16,'0');
-                          let hi = parseInt(s.slice(0,8),16)>>>0, lo = parseInt(s.slice(8,16),16)>>>0;
-                          if (pChunk.fields.clip.instance.lo !== lo || pChunk.fields.clip.instance.hi !== hi) {
-                              pChunk.fields.clip.instance.lo = lo; pChunk.fields.clip.instance.hi = hi; pChunk.fields.strData = '';
-                              pChunk.modified = true; changeCount++;
-                          }
-                      }
-                  }
-              }
-
-          } else {
-              // State BARU terdeteksi di teks!
-              pushUndo('Script edit: Add State');
-              const { stateIdx } = createStateWithDG(ts.hash);
-              newStateList.push(stateIdx);
-              sm.modified = true; changeCount++;
+          if (isAction && !idsInText.has(nIdx)) {
+            pushUndo('Script edit: Delete Node');
+            removeNodeFromDG(dg, nIdx); // Hapus dari Graph
+            deleteChunkDeep(nIdx);      // Hapus chunk-nya secara permanen
+            structuralChange = true;
+            changeCount++;
           }
+        }
       }
-
-      // 3. DETEKSI STATE YANG DIHAPUS DARI TEKS
-      // Jika state ada di memori tapi tidak ditemukan di teks, hapus dari memori!
-      for (const oldIdx of sm.fields.states) {
-          if (!newStateList.includes(oldIdx)) {
-              pushUndo('Script edit: Delete State');
-              deleteChunkWithChildren(oldIdx); // Hapus bersih sampai ke akar DG-nya
-              sm.modified = true; changeCount++;
-          }
-      }
-
-      // Terapkan susunan State yang baru
-      if (JSON.stringify(sm.fields.states) !== JSON.stringify(newStateList)) {
-          sm.fields.states = newStateList; sm.modified = true; changeCount++;
-      }
+    }
   }
 
-  // 4. FINISHING
-  if (changeCount > 0) {
+  // 4. DETEKSI DELETE STATE (Termasuk hapus DG-nya)
+  const existingStates = [...sm.fields.states].reverse();
+  for (const stIdx of existingStates) {
+    if (!idsInText.has(stIdx)) {
+      pushUndo('Script edit: Delete State');
+      removeStateFromSM(sm, stIdx);
+      deleteChunkWithChildren(stIdx); // Hapus state + seluruh DG di bawahnya
+      structuralChange = true;
+      changeCount++;
+    }
+  }
+
+  // 5. FINISHING & SIMPAN
+  if (changeCount > 0 || structuralChange) {
       updateNameCountBadge();
-      // PENTING: Gunakan true agar tidak memicu renderScript() yang menimpa teks!
-      window.renderTree(true); 
-      if (state.selIdx !== null) renderProps();
-      updateScriptStatus(`✅ Auto-saved (${changeCount} perubahan memori)`, 'ss-ok');
       
-      // Nyalakan tombol Save karena file sudah dimodifikasi
+      // Update UI Tree tanpa menyentuh textarea script (hindari menimpa teks)
+      renderTree(); 
+      if (state.selIdx !== null) renderProps();
+      
+      updateScriptStatus(`✅ Tersimpan: ${changeCount} aksi diedit/dihapus`, 'ss-ok');
       document.getElementById('saveBtn').disabled = false;
   } else {
       updateScriptStatus('✅ Tersinkronisasi', 'ss-ok');
@@ -6226,10 +6202,6 @@ function scriptRefresh() {
     renderScript();
   }
 }
-
-
-// Save original renderTree reference before any possible override
-window._jazzOrigRenderTree = renderTree;
 
 // Init
 setupDropZone();
