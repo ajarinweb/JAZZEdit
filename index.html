@@ -3045,14 +3045,14 @@ function updateAllRefsAfterDelete(deletedIdx) {
     c.modified = true; // ref indices changed → must re-serialize
     const f = c.fields;
 
-    // StateMachine
+    // StateMachine — filter nulls so count is always accurate
     if (f.actorDefs)   f.actorDefs   = nn(f.actorDefs);
     if (f.paramDefs)   f.paramDefs   = nn(f.paramDefs);
     if (f.states)      f.states      = nn(f.states);
     // State
     if ('dgIndex' in f)    f.dgIndex    = updateIdxRef(f.dgIndex, deletedIdx);
     if (f.transitions)     f.transitions = nn(f.transitions);
-    // DecisionGraph
+    // DecisionGraph — filter nulls so allNodes/graphRoot count is accurate
     if (f.allNodes)    f.allNodes    = nn(f.allNodes);
     if (f.graphRoot)   f.graphRoot   = nn(f.graphRoot);
     // Animation nodes
@@ -3065,14 +3065,6 @@ function updateAllRefsAfterDelete(deletedIdx) {
     // SelectOnParameter cases
     if (f.cases) f.cases.forEach(cas => { cas.actions = nn(cas.actions); });
   }
-
-  // ===== KODE TAMBAHAN FIX =====
-  // Sinkronisasi ulang urutan .index setiap chunk agar sama dengan posisi array-nya
-  chunks.forEach((c, idx) => {
-    c.index = idx;
-  });
-  // =============================
-
   // Update selIdx
   if (state.selIdx === deletedIdx) state.selIdx = null;
   else if (state.selIdx > deletedIdx) state.selIdx--;
@@ -3212,6 +3204,7 @@ function detachDGFromState(stateChunk) {
       notify(`Detached DecisionGraph #${dgIdx} from state`);
       renderTree();
       renderProps();
+      scriptRefresh();
     }
   );
 }
@@ -3525,6 +3518,7 @@ function uiAddStateToSM() {
     state.selIdx = stateIdx;
     notify(`Created State ${h8(nameHash)} (#${stateIdx}) with DG #${dgIdx}`);
     renderTree(); renderProps();
+    scriptRefresh();
   });
 }
 
@@ -3659,6 +3653,7 @@ function finishAddNodeToDG(dgChunk, newIdx) {
   state.selIdx = newIdx;
   notify(`Added ${newChunk.typeName} #${newIdx} to DecisionGraph`);
   renderTree(); renderProps();
+  scriptRefresh();
 }
 
 
@@ -6009,12 +6004,16 @@ function applyScriptEdits(text) {
 
   if (changeCount > 0) {
     updateNameCountBadge();
-    // Re-render tree (reflects name changes) but NOT script (would interrupt typing)
-    window.renderTree(true); // <--- Lempar parameter 'true' ke sini
+    // Call original renderTree directly — NOT window.renderTree (which might call scriptRefresh)
+    // This updates the tree panel without touching the textarea
+    const origRT = window._jazzOrigRenderTree || renderTree;
+    origRT();
     if (state.selIdx !== null) renderProps();
-    updateScriptStatus(`✅ Applied ${changeCount} change(s)`, 'ss-ok');
+    updateScriptStatus(`✅ Applied ${changeCount} change(s) — Ctrl+Z to undo`, 'ss-ok');
+    _scriptDirty = false;
   } else {
     updateScriptStatus('No changes detected', '');
+    _scriptDirty = false;
   }
 }
 
@@ -6186,6 +6185,8 @@ function setViewMode(mode) {
     treeHeader.textContent = 'Navigator';
     document.getElementById('btnViewScript').classList.add('active');
     document.getElementById('btnViewTree').classList.remove('active');
+    // Always do fresh render when entering script mode
+    _scriptDirty = false;
     renderScript();
     setTimeout(() => document.getElementById('script-textarea')?.focus(), 100);
   } else {
@@ -6193,11 +6194,14 @@ function setViewMode(mode) {
     treeHeader.textContent = 'Structure';
     document.getElementById('btnViewTree').classList.add('active');
     document.getElementById('btnViewScript').classList.remove('active');
-    // Flush any pending edits when switching away
+    // Flush any pending edits when switching back to tree
     if (_scriptDirty) {
       clearTimeout(_scriptApplyTimer);
-      applyScriptEdits(document.getElementById('script-textarea').value);
+      applyScriptEdits(document.getElementById('script-textarea')?.value || '');
     }
+    // Re-render tree to reflect any changes made in script
+    (window._jazzOrigRenderTree || renderTree)();
+    renderProps();
   }
 }
 
@@ -6231,15 +6235,22 @@ document.getElementById('scriptBtnCopy').addEventListener('click', () => {
 document.getElementById('btnViewTree').addEventListener('click', () => setViewMode('tree'));
 document.getElementById('btnViewScript').addEventListener('click', () => setViewMode('script'));
 
-// ── Re-render when data changes externally ────────────
-// Save original renderTree so we can call it from the wrapper
-const _origRenderTree = renderTree;
-window.renderTree = function(skipScriptUpdate = false) {
-  _origRenderTree();
-  // Hanya render ulang script jika BUKAN dari auto-apply textarea
-  if (scriptMode && state.jazz && !skipScriptUpdate) renderScript();
-};
+// ── scriptRefresh: only call when model structurally changes ──
+// Do NOT call this on tree navigation clicks — only on add/delete/structural edits
+function scriptRefresh() {
+  if (scriptMode && state.jazz) {
+    // If user has dirty edits, ask before overwriting
+    if (_scriptDirty) {
+      clearTimeout(_scriptApplyTimer);
+      applyScriptEdits(document.getElementById('script-textarea')?.value || '');
+    }
+    renderScript();
+  }
+}
 
+
+// Save original renderTree reference before any possible override
+window._jazzOrigRenderTree = renderTree;
 
 // Init
 setupDropZone();
