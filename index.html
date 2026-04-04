@@ -5879,96 +5879,239 @@ function updateCursorPos() {
 // ════════════════════════════════════════════════════════
 function applyScriptEdits(text) {
   if (!state.jazz) return;
-  const chunks = state.jazz.chunks;
-  const sm = chunks[0];
+  const sm = state.jazz.chunks[0];
   if (!sm || !sm.fields) return;
 
   let changeCount = 0;
-  let structuralChange = false;
+
+  // ─── 1. PARSER: BACA SELURUH TEKS MENJADI AST (Abstract Syntax Tree) ───
   const lines = text.split('\n');
+  let astActors = [];
+  let astParams = [];
+  let astStates = [];
+  let currentScope = 'sm'; 
+  let activeState = null;
+  let blockDepth = 0;
 
-  // 1. KUMPULKAN SEMUA ID YANG MASIH ADA DI TEKS
-  const idsInText = new Set();
-  for (const l of lines) {
-    const idMatch = l.match(/\/\/\s*#(\d+)/);
-    if (idMatch) idsInText.add(parseInt(idMatch[1], 10));
-  }
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].split('//')[0].trim(); // Abaikan komentar
+    if (!line) continue;
 
-  // 2. UPDATE VALUE / EDIT CLIP HASH (Berdasarkan ID)
-  for (const l of lines) {
-    const idMatch = l.match(/\/\/\s*#(\d+)/);
-    if (!idMatch) continue;
-    
-    const chunkIdx = parseInt(idMatch[1], 10);
-    const chunk = chunks[chunkIdx];
-    if (!chunk || !chunk.fields) continue;
-
-    const f = chunk.fields;
-    let changed = false;
-
-    if (chunk.type === 0x02eedb5f) { // Play Animation
-      const mPlay = l.match(/Play\s+(0x[0-9a-fA-F]{16})/i);
-      if (mPlay) {
-        const s = mPlay[1].replace(/^0x/i,'').padStart(16,'0');
-        const hi = parseInt(s.slice(0,8),16)>>>0, lo = parseInt(s.slice(8,16),16)>>>0;
-        if (lo !== f.clip.instance.lo || hi !== f.clip.instance.hi) {
-          f.clip.instance.lo = lo; f.clip.instance.hi = hi; f.strData = ''; changed = true;
+    if (currentScope === 'sm' && line.startsWith('State Machine')) {
+        let m = line.match(/State Machine\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)/i);
+        if (m) {
+            let hash = parseHex(m[1]) ?? fnv32Lower(m[1]);
+            if (sm.fields.name !== hash) { sm.fields.name = hash; sm.modified = true; changeCount++; }
         }
-      }
-      const mSub = l.match(/Play\s+"([^"]+)"/i);
-      if (mSub && mSub[1] !== f.strData) { f.strData = mSub[1]; changed = true; }
     }
-
-    if (changed) { chunk.modified = true; changeCount++; }
-  }
-
-  // 3. DETEKSI DELETE NODE DARI DECISION GRAPH
-  // Jika ID node hilang dari teks, basmi node tersebut dari DG!
-  for (let i = chunks.length - 1; i >= 1; i--) {
-    const dg = chunks[i];
-    if (dg && dg.type === 0x02eedb18 && dg.fields) { // DecisionGraph
-      const nodes = [...dg.fields.allNodes].reverse();
-      for (const nIdx of nodes) {
-        if (nIdx !== null && chunks[nIdx]) {
-          // Node aksi (Play, Stop, dll) yang kita pasangi KTP
-          const isAction = [0x02eedb5f, 0x0344d438, 0x02eedb70, 0x02eeebdd, 0x02eeebdc].includes(chunks[nIdx].type);
-          
-          if (isAction && !idsInText.has(nIdx)) {
-            pushUndo('Script edit: Delete Node');
-            removeNodeFromDG(dg, nIdx); // Hapus dari Graph
-            deleteChunkDeep(nIdx);      // Hapus chunk-nya secara permanen
-            structuralChange = true;
-            changeCount++;
-          }
+    else if (currentScope === 'sm' && line.startsWith('Actor ')) {
+        let m = line.match(/^Actor\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)(?:\s*=\s*(0x[0-9a-fA-F]{8}))?/i);
+        if (m) astActors.push({ name: parseHex(m[1]) ?? fnv32Lower(m[1]), def: m[2] ? parseHex(m[2]) : 0 });
+    }
+    else if (currentScope === 'sm' && line.startsWith('Parameter ')) {
+        let m = line.match(/^Parameter\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)(?:\s*=\s*(0x[0-9a-fA-F]{8}))?/i);
+        if (m) astParams.push({ name: parseHex(m[1]) ?? fnv32Lower(m[1]), def: m[2] ? parseHex(m[2]) : 0 });
+    }
+    else if (line.startsWith('State ')) {
+        let m = line.match(/^State\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)/i);
+        if (m) {
+            activeState = { name: parseHex(m[1]) ?? fnv32Lower(m[1]), props: 0, transitions: [], textLines: [] };
+            astStates.push(activeState);
+            currentScope = 'state';
+            blockDepth = line.endsWith('{') ? 1 : 0;
         }
-      }
+    }
+    else if (currentScope === 'state' || currentScope === 'dg') {
+        if (line.includes('{')) blockDepth += (line.match(/\{/g) || []).length;
+        if (line.includes('}')) blockDepth -= (line.match(/\}/g) || []).length;
+
+        if (blockDepth <= 0) {
+            currentScope = 'sm';
+            activeState = null;
+            continue;
+        }
+
+        if (currentScope === 'state') {
+            if (line.startsWith('Properties ')) {
+                let flags = 0; const up = line.toUpperCase();
+                if (up.includes('LOOP')) flags |= 0x01;
+                if (up.includes('PERSISTENT')) flags |= 0x02;
+                if (up.includes('ENTRY')) flags |= 0x04;
+                if (up.includes('EXIT')) flags |= 0x08;
+                activeState.props = flags;
+            }
+            else if (line.startsWith('Transitions to ')) {
+                let m = line.match(/Transitions to\s+(0x[0-9a-fA-F]{8}|[a-zA-Z_0-9]+)/i);
+                if (m) activeState.transitions.push(parseHex(m[1]) ?? fnv32Lower(m[1]));
+            }
+            else if (line.startsWith('Decision Graph')) {
+                currentScope = 'dg';
+            }
+        } else if (currentScope === 'dg') {
+            activeState.textLines.push(line);
+        }
     }
   }
 
-  // 4. DETEKSI DELETE STATE (Termasuk hapus DG-nya)
-  const existingStates = [...sm.fields.states].reverse();
-  for (const stIdx of existingStates) {
-    if (!idsInText.has(stIdx)) {
-      pushUndo('Script edit: Delete State');
-      removeStateFromSM(sm, stIdx);
-      deleteChunkWithChildren(stIdx); // Hapus state + seluruh DG di bawahnya
-      structuralChange = true;
-      changeCount++;
-    }
-  }
+  // ─── 2. SINKRONISASI ACTORS ───
+  const oldActors = sm.fields.actorDefs.filter(i => i !== null);
+  const newActorIdxs = [];
+  astActors.forEach(astA => {
+     let existingIdx = oldActors.find(idx => state.jazz.chunks[idx]?.fields?.parameterName === astA.name);
+     if (existingIdx !== undefined) {
+         newActorIdxs.push(existingIdx);
+         let chunk = state.jazz.chunks[existingIdx];
+         if (chunk.fields.defaultValue !== astA.def) { chunk.fields.defaultValue = astA.def; chunk.modified = true; changeCount++; }
+     } else {
+         let newIdx = appendChunk(0x02eedb2f, { parameterName: astA.name, defaultValue: astA.def });
+         newActorIdxs.push(newIdx); changeCount++;
+     }
+  });
+  oldActors.forEach(oldIdx => { if (!newActorIdxs.includes(oldIdx)) { deleteChunkDeep(oldIdx); changeCount++; } });
+  if (JSON.stringify(sm.fields.actorDefs) !== JSON.stringify(newActorIdxs)) { sm.fields.actorDefs = newActorIdxs; sm.modified = true; }
 
-  // 5. FINISHING & SIMPAN
-  if (changeCount > 0 || structuralChange) {
+  // ─── 3. SINKRONISASI PARAMETERS ───
+  const oldParams = sm.fields.paramDefs.filter(i => i !== null);
+  const newParamIdxs = [];
+  astParams.forEach(astP => {
+     let existingIdx = oldParams.find(idx => state.jazz.chunks[idx]?.fields?.paramName === astP.name);
+     if (existingIdx !== undefined) {
+         newParamIdxs.push(existingIdx);
+         let chunk = state.jazz.chunks[existingIdx];
+         if (chunk.fields.defaultValue !== astP.def) { chunk.fields.defaultValue = astP.def; chunk.modified = true; changeCount++; }
+     } else {
+         let newIdx = appendChunk(0x02eedb46, { paramName: astP.name, defaultValue: astP.def });
+         newParamIdxs.push(newIdx); changeCount++;
+     }
+  });
+  oldParams.forEach(oldIdx => { if (!newParamIdxs.includes(oldIdx)) { deleteChunkDeep(oldIdx); changeCount++; } });
+  if (JSON.stringify(sm.fields.paramDefs) !== JSON.stringify(newParamIdxs)) { sm.fields.paramDefs = newParamIdxs; sm.modified = true; }
+
+  // ─── 4. SINKRONISASI STATES ───
+  const oldStates = sm.fields.states.filter(i => i !== null);
+  const newStateIdxs = [];
+  astStates.forEach(astS => {
+     let existingIdx = oldStates.find(idx => state.jazz.chunks[idx]?.fields?.stateName === astS.name);
+     let stateChunk;
+     if (existingIdx !== undefined) {
+         newStateIdxs.push(existingIdx);
+         stateChunk = state.jazz.chunks[existingIdx];
+     } else {
+         const res = createStateWithDG(astS.name); // Otomatis buat DG baru
+         newStateIdxs.push(res.stateIdx);
+         stateChunk = state.jazz.chunks[res.stateIdx];
+         changeCount++;
+     }
+     if (stateChunk.fields.stateProperties !== astS.props) {
+         stateChunk.fields.stateProperties = astS.props;
+         stateChunk.modified = true; changeCount++;
+     }
+  });
+
+  // ─── 5. SINKRONISASI TRANSISI & DECISION GRAPH (Node Play/Stop/Random/Prop) ───
+  astStates.forEach((astS, i) => {
+     let stateChunk = state.jazz.chunks[newStateIdxs[i]];
+     
+     // Transisi
+     let transIndices = [];
+     astS.transitions.forEach(thash => {
+         let targetIdx = newStateIdxs.find(idx => state.jazz.chunks[idx]?.fields?.stateName === thash);
+         if (targetIdx !== undefined) transIndices.push(targetIdx);
+     });
+     if (JSON.stringify(stateChunk.fields.transitions) !== JSON.stringify(transIndices)) {
+         stateChunk.fields.transitions = transIndices;
+         stateChunk.modified = true; changeCount++;
+     }
+
+     // Decision Graph
+     if (astS.textLines.length > 0 && stateChunk.fields.dgIndex !== null) {
+        let dgChunk = state.jazz.chunks[stateChunk.fields.dgIndex];
+        const textBlock = astS.textLines.join('\n');
+        
+        const playRegex = /Play\s+(0x[0-9a-fA-F]{16}|"[^"]+")/gim;
+        let plays = []; let pm;
+        while ((pm = playRegex.exec(textBlock)) !== null) { plays.push(pm[1]); }
+        
+        let stopsCount = (textBlock.match(/Stop Animation/gim) || []).length;
+        let randsCount = (textBlock.match(/Select Random/gim) || []).length;
+        let propsCount = (textBlock.match(/Create Prop/gim) || []).length;
+
+        let memNodes = dgChunk.fields.allNodes.filter(n => n !== null).map(n => state.jazz.chunks[n]);
+        let memPlays = memNodes.filter(c => c && c.type === 0x02eedb5f);
+        let memStops = memNodes.filter(c => c && c.type === 0x0344d438);
+        let memRands = memNodes.filter(c => c && c.type === 0x02eedb70);
+        let memProps = memNodes.filter(c => c && c.type === 0x02eeebdd);
+
+        // Update Play Nodes
+        for (let j = 0; j < plays.length; j++) {
+            let val = plays[j];
+            let isStr = val.startsWith('"');
+            let strData = isStr ? val.replace(/"/g, '') : '';
+            let lo = 0, hi = 0;
+            if (!isStr) {
+                let s = val.replace(/^0x/i,'').padStart(16,'0');
+                hi = parseInt(s.slice(0,8), 16) >>> 0; lo = parseInt(s.slice(8,16), 16) >>> 0;
+            }
+
+            if (j < memPlays.length) {
+                let pChunk = memPlays[j];
+                if (isStr) {
+                    if (pChunk.fields.strData !== strData) { pChunk.fields.strData = strData; pChunk.modified = true; changeCount++; }
+                } else {
+                    if (pChunk.fields.clip.instance.lo !== lo || pChunk.fields.clip.instance.hi !== hi) {
+                        pChunk.fields.clip.instance.lo = lo; pChunk.fields.clip.instance.hi = hi; pChunk.fields.strData = '';
+                        pChunk.modified = true; changeCount++;
+                    }
+                }
+            } else {
+                let hex = isStr ? '0x0000000000000000' : val;
+                let newIdx = createPlayChunk(hex);
+                if (isStr) state.jazz.chunks[newIdx].fields.strData = strData;
+                dgChunk.fields.allNodes.push(newIdx); dgChunk.fields.graphRoot.push(newIdx);
+                dgChunk.modified = true; changeCount++;
+            }
+        }
+        // Hapus Play Nodes yg tidak ada di teks
+        for (let j = plays.length; j < memPlays.length; j++) {
+             removeNodeFromDG(dgChunk, memPlays[j].index); deleteChunkDeep(memPlays[j].index); changeCount++;
+        }
+
+        // Hapus/Tambah Stop, Random, & Prop Node
+        const syncNode = (count, memArr, createFn) => {
+            if (count > memArr.length) {
+                for(let j = memArr.length; j < count; j++) {
+                    let newIdx = createFn();
+                    dgChunk.fields.allNodes.push(newIdx); dgChunk.fields.graphRoot.push(newIdx); dgChunk.modified = true; changeCount++;
+                }
+            } else if (count < memArr.length) {
+                for(let j = count; j < memArr.length; j++) {
+                    removeNodeFromDG(dgChunk, memArr[j].index); deleteChunkDeep(memArr[j].index); changeCount++;
+                }
+            }
+        };
+        
+        syncNode(stopsCount, memStops, createStopChunk);
+        syncNode(randsCount, memRands, createRandomChunk);
+        syncNode(propsCount, memProps, () => appendChunk(0x02eeebdd, { actorIdx: null, propUnk1: [0], catalogRef: {instance:{lo:0,hi:0}, type:0, group:0}, propUnk2: [0,0,0,0], actions: [], dgnTag: '/DGN' }));
+     }
+  });
+
+  // Hapus state yg sdh hilang dari teks
+  oldStates.forEach(oldIdx => { if (!newStateIdxs.includes(oldIdx)) { deleteChunkDeep(oldIdx); changeCount++; } });
+  if (JSON.stringify(sm.fields.states) !== JSON.stringify(newStateIdxs)) { sm.fields.states = newStateIdxs; sm.modified = true; }
+
+  // ─── FINISHING ───
+  if (changeCount > 0) {
       updateNameCountBadge();
-      
-      // Update UI Tree tanpa menyentuh textarea script (hindari menimpa teks)
-      renderTree(); 
+      const origRT = window._jazzOrigRenderTree || window.renderTree;
+      origRT(); // Update UI tanpa menyentuh textarea script
       if (state.selIdx !== null) renderProps();
-      
-      updateScriptStatus(`✅ Tersimpan: ${changeCount} aksi diedit/dihapus`, 'ss-ok');
+      updateScriptStatus(`✅ Auto-saved (${changeCount} aksi diedit)`, 'ss-ok');
       document.getElementById('saveBtn').disabled = false;
+      _scriptDirty = false;
   } else {
-      updateScriptStatus('✅ Tersinkronisasi', 'ss-ok');
+      updateScriptStatus('✅ Up to date', 'ss-ok');
+      _scriptDirty = false;
   }
 }
 
