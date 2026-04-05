@@ -1057,6 +1057,7 @@ body {
     </div>
 
     <div class="tb-r1-btns">
+      <button class="btn btn-open" id="newFileBtn" style="padding:5px 14px;font-size:12px">📄 New</button>
       <label for="fileInput" class="btn btn-open" style="padding:5px 14px;font-size:12px">📂 Open</label>
       <input type="file" id="fileInput" accept=".jazz" style="display:none">
       <input type="file" id="compareInput" accept=".jazz" style="display:none">
@@ -3871,6 +3872,94 @@ function saveFile() {
 }
 
 // ═══════════════════════════════════════════════════════
+// CREATE NEW JAZZ FILE
+// ═══════════════════════════════════════════════════════
+function createNewJazzFile() {
+  // Jika sedang membuka file, beri peringatan dulu agar editan tidak hilang
+  if (state.jazz) {
+    confirmModal(
+      '📄 Buat File Baru', 
+      'Tutup file saat ini dan buat file baru dari nol?<br><br><span style="color:var(--warn)">Perubahan yang belum di-save akan hilang!</span>', 
+      'Buat Baru', 
+      doCreateNew
+    );
+  } else {
+    doCreateNew();
+  }
+
+  function doCreateNew() {
+    const defaultName = 'Untitled_StateMachine';
+    
+    // 1. Buat kerangka dasar file JAZZ v3
+    state.jazz = {
+      version: 3,
+      count: 1,
+      chunks: [],
+      filename: 'Untitled.jazz'
+    };
+
+    // 2. Buat chunk wajib: StateMachine (index 0)
+    const smChunk = {
+      index: 0,
+      type: 0x02d5df13,
+      typeName: 'StateMachine',
+      fourcc: 'S_SM',
+      chunkVer: 0x202,
+      instance: { lo: 0, hi: 0 },
+      group: 0,
+      rawData: new Uint8Array(0),
+      fields: {
+        name: fnv32Lower(defaultName),
+        actorDefs: [],
+        paramDefs: [],
+        states: [],
+        actorAssignments: [],
+        sentinel: 0xDEADBEEF,
+        properties: 0,
+        priority: 10000,
+        unknowns: [2, 0, 0, 0, 0] // Nilai default dari game
+      },
+      modified: true,
+      isNew: true
+    };
+    
+    state.jazz.chunks.push(smChunk);
+
+    // 3. Reset State & UI
+    state.filename = 'Untitled.jazz';
+    state.selIdx = 0;
+    treeExpanded.clear();
+    treeExpanded.add(0);
+    
+    // Bersihkan riwayat Undo/Redo sebelumnya
+    undoStack.length = 0;
+    redoStack.length = 0;
+    updateUndoUI();
+
+    // 4. Nyalakan antarmuka (Toolbar, Save button, dll)
+    document.getElementById('saveBtn').disabled = false;
+    document.getElementById('verSwitch').style.display = '';
+    document.getElementById('topbar-row2').classList.add('active');
+    document.getElementById('fileBadge').textContent = state.filename;
+    
+    const vb = document.getElementById('versionBadge');
+    vb.innerHTML = `<span class="badge badge-v3">JAZZ v3</span>`;
+    document.getElementById('saveVersion').value = "3";
+
+    // 5. Tambahkan nama default ke kamus Name Map agar teksnya bisa terbaca
+    nameMap.set(fnv32Lower(defaultName), defaultName);
+    updateNameCountBadge();
+
+    // 6. Render Ulang Layar
+    renderTree();
+    renderProps();
+    if (typeof scriptRefresh === 'function') scriptRefresh();
+    
+    notify('✅ File JAZZ baru berhasil dibuat!');
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════════════════
 let notifTimer = null;
@@ -3913,6 +4002,9 @@ document.getElementById('fileInput').addEventListener('change', e => {
 
 // Save button
 document.getElementById('saveBtn').addEventListener('click', saveFile);
+
+// Tambahkan baris ini di dekat event listener saveBtn atau fileInput
+document.getElementById('newFileBtn').addEventListener('click', createNewJazzFile);
 
 
 // ═══════════════════════════════════════════════════════
